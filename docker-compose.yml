@@ -1,0 +1,42 @@
+# =============================================================================
+# docker-compose.yml -- run the whole SecureCode AI platform with one
+# command:  docker compose up --build
+#
+# Two services: backend (FastAPI + the existing trained ML pipeline) and
+# frontend (the built React dashboard, served by nginx, proxying /api/* to
+# the backend container). The SQLite database (backend/data/platform.db)
+# persists in a named volume across restarts.
+# =============================================================================
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    container_name: securecode-ai-backend
+    ports:
+      - "8000:8000"
+    volumes:
+      - scan_data:/srv/backend/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: securecode-ai-frontend
+    ports:
+      - "5173:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  scan_data:
+    driver: local

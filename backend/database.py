@@ -1,0 +1,93 @@
+# =============================================================================
+# database.py -- SQLite persistence for scan history / analytics / dashboard.
+# New addition for the platform layer; does not touch the ML pipeline.
+# =============================================================================
+
+import os
+import uuid
+import datetime as dt
+
+from sqlalchemy import create_engine, Column, String, Float, Integer, Text, DateTime, text
+from sqlalchemy.orm import sessionmaker, declarative_base
+
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DATA_DIR = os.path.join(PROJECT_ROOT, "backend", "data")
+os.makedirs(DATA_DIR, exist_ok=True)
+DB_PATH = os.path.join(DATA_DIR, "platform.db")
+
+engine = create_engine(f"sqlite:///{DB_PATH}", connect_args={"check_same_thread": False})
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+Base = declarative_base()
+
+
+def new_id() -> str:
+    return uuid.uuid4().hex[:12]
+
+
+class ScanRecord(Base):
+    __tablename__ = "scans"
+
+    id = Column(String, primary_key=True, default=new_id)
+    batch_id = Column(String, index=True, nullable=True)
+    project_name = Column(String, default="Untitled Project")
+    filename = Column(String, default="pasted_code.c")
+    source = Column(String, default="paste")  # paste | upload | zip | example
+    code = Column(Text)
+
+    verdict = Column(String)
+    vuln_probability = Column(Float)
+    safe_probability = Column(Float)
+    confidence = Column(Float)
+    risk_level = Column(String)
+    risk_tag = Column(String)
+    risk_color = Column(String)
+    model_used = Column(String)
+    is_demo = Column(Integer, default=0)
+
+    ast_features_json = Column(Text)
+    metric_features_json = Column(Text)
+    embedding_dims = Column(Integer, default=0)
+    embedding_2d_x = Column(Float, nullable=True)
+    embedding_2d_y = Column(Float, nullable=True)
+
+    lines = Column(Integer, default=0)
+    loc = Column(Integer, default=0)
+
+    # Phase 11 (Project Management) -- additive, nullable-safe columns for
+    # bookmarking/pinning and free-form tagging. Existing rows default to
+    # "not pinned" / "no tags" via the migration below; no existing data
+    # is touched.
+    is_pinned = Column(Integer, default=0)
+    tags = Column(Text, default="")
+
+    created_at = Column(DateTime, default=dt.datetime.utcnow, index=True)
+
+
+Base.metadata.create_all(bind=engine)
+
+
+def _migrate_add_columns():
+    """
+    SQLAlchemy's create_all() only creates missing TABLES, not missing
+    COLUMNS on an already-existing table. Since `scans` already has rows
+    from earlier phases, new nullable columns are added here via a plain
+    ALTER TABLE, guarded by a check so this is a no-op on repeated startup.
+    """
+    with engine.connect() as conn:
+        existing = {row[1] for row in conn.execute(text("PRAGMA table_info(scans)"))}
+        if "is_pinned" not in existing:
+            conn.execute(text("ALTER TABLE scans ADD COLUMN is_pinned INTEGER DEFAULT 0"))
+        if "tags" not in existing:
+            conn.execute(text("ALTER TABLE scans ADD COLUMN tags TEXT DEFAULT ''"))
+        conn.commit()
+
+
+_migrate_add_columns()
+
+
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()

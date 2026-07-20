@@ -1,0 +1,23 @@
+# Backend build context (project root) -- keep the build fast by not
+# sending unrelated large/irrelevant directories to the Docker daemon.
+frontend/node_modules
+frontend/dist
+vscode-extension/node_modules
+vscode-extension/dist
+venv/
+__pycache__/
+**/__pycache__/
+.git/
+notebooks/
+results/
+paper/
+src/
+scratch_shots/
+test.py
+
+# Only 2 files are actually COPYed from dataset/processed/ (see
+# backend/Dockerfile) -- exclude everything else in that 682MB directory.
+dataset/processed/*
+!dataset/processed/final_features.csv
+!dataset/processed/devign_cleaned.csv
+dataset/raw/

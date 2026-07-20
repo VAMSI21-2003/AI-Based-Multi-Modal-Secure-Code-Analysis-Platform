@@ -1,0 +1,6 @@
+# Test-only dependencies, layered on top of the curated production
+# requirements.txt. Kept separate so requirements.txt (used by the Docker
+# image) stays exactly as curated -- this file is CI/local-dev only.
+-r requirements.txt
+
+pytest==8.4.2

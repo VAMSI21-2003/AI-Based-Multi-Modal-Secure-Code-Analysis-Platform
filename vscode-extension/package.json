@@ -1,0 +1,64 @@
+{
+  "name": "securecode-ai",
+  "displayName": "SecureCode AI — Vulnerability Detection",
+  "description": "Right-click Scan File / Scan Function / Scan Project against the SecureCode AI backend (CodeBERT + AST + Metrics + XGBoost). Inline diagnostics, CodeLens, quick fixes, and one-click links into the full web platform.",
+  "version": "0.1.0",
+  "publisher": "securecode-ai",
+  "engines": { "vscode": "^1.85.0" },
+  "categories": ["Linters", "Other"],
+  "activationEvents": [
+    "onLanguage:c",
+    "onLanguage:cpp"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      { "command": "securecodeAi.scanFile", "title": "SecureCode AI: Scan File", "category": "SecureCode AI" },
+      { "command": "securecodeAi.scanFunction", "title": "SecureCode AI: Scan Function at Cursor", "category": "SecureCode AI" },
+      { "command": "securecodeAi.scanProject", "title": "SecureCode AI: Scan Project (workspace folder)", "category": "SecureCode AI" },
+      { "command": "securecodeAi.openDashboard", "title": "SecureCode AI: Open Dashboard", "category": "SecureCode AI" },
+      { "command": "securecodeAi.generateReport", "title": "SecureCode AI: Generate PDF Report for Last Scan", "category": "SecureCode AI" },
+      { "command": "securecodeAi.openExploitSimulator", "title": "SecureCode AI: Open Exploit Simulator", "category": "SecureCode AI" },
+      { "command": "securecodeAi.openExplanation", "title": "SecureCode AI: Open AI Explanation for Last Scan", "category": "SecureCode AI" },
+      { "command": "securecodeAi.applySuggestedFix", "title": "SecureCode AI: Apply Suggested Secure Rewrite", "category": "SecureCode AI" }
+    ],
+    "menus": {
+      "editor/context": [
+        { "command": "securecodeAi.scanFile", "when": "editorLangId == c || editorLangId == cpp", "group": "securecodeAi@1" },
+        { "command": "securecodeAi.scanFunction", "when": "editorLangId == c || editorLangId == cpp", "group": "securecodeAi@2" }
+      ],
+      "explorer/context": [
+        { "command": "securecodeAi.scanProject", "when": "explorerResourceIsFolder", "group": "securecodeAi@1" }
+      ]
+    },
+    "configuration": {
+      "title": "SecureCode AI",
+      "properties": {
+        "securecodeAi.backendUrl": {
+          "type": "string",
+          "default": "http://127.0.0.1:8000",
+          "description": "Base URL of the running SecureCode AI FastAPI backend (see backend/main.py)."
+        },
+        "securecodeAi.frontendUrl": {
+          "type": "string",
+          "default": "http://localhost:5173",
+          "description": "Base URL of the running SecureCode AI web dashboard (Vite dev server or built site)."
+        },
+        "securecodeAi.scanOnSave": {
+          "type": "boolean",
+          "default": false,
+          "description": "Automatically re-run Scan File whenever a .c/.cpp/.h file is saved."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -w -p ./"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/vscode": "^1.85.0",
+    "typescript": "^5.4.0"
+  }
+}
