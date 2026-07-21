@@ -25,13 +25,15 @@ export default function CallGraphExplorer() {
   const [highlightDangerous, setHighlightDangerous] = useState(true);
 
   useEffect(() => {
-    if (!batchId) { getBatches().then(setBatches); return; }
+    let cancelled = false;
+    if (!batchId) { getBatches().then((b) => { if (!cancelled) setBatches(b); }); return () => { cancelled = true; }; }
     setLoading(true);
     setError(null);
     getDependencyGraph(batchId)
-      .then(setData)
-      .catch((e) => setError(e?.response?.data?.detail || e.message || "Failed to load call graph"))
-      .finally(() => setLoading(false));
+      .then((d) => { if (!cancelled) setData(d); })
+      .catch((e) => { if (!cancelled) setError(e?.response?.data?.detail || e.message || "Failed to load call graph"); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
   }, [batchId]);
 
   if (!batchId) {

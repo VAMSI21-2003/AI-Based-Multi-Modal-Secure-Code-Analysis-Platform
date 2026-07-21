@@ -17,8 +17,10 @@ export default function Research() {
   const [model, setModel] = useState<ModelKey>("xgboost");
 
   useEffect(() => {
-    getEvalCurves().then(setCurves);
-    getModelArchitecture().then(setArch);
+    let cancelled = false;
+    getEvalCurves().then((c) => { if (!cancelled) setCurves(c); });
+    getModelArchitecture().then((a) => { if (!cancelled) setArch(a); });
+    return () => { cancelled = true; };
   }, []);
 
   if (!curves || !arch) {

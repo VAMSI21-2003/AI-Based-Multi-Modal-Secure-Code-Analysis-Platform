@@ -32,22 +32,25 @@ export default function CommandCenter() {
   const [quickScanOpen, setQuickScanOpen] = useState(false);
 
   useEffect(() => {
-    getHistory({ sort: "risk", order: "desc", limit: 10 }).then((d) => setTopDangerous(d.results));
-    getCodeHealth().then(setHealth);
-    getBatches().then((b) => setProjects(b.slice(0, 6)));
+    let cancelled = false;
+    getHistory({ sort: "risk", order: "desc", limit: 10 }).then((d) => { if (!cancelled) setTopDangerous(d.results); });
+    getCodeHealth().then((h) => { if (!cancelled) setHealth(h); });
+    getBatches().then((b) => { if (!cancelled) setProjects(b.slice(0, 6)); });
+    return () => { cancelled = true; };
   }, []);
 
   // Everything else on this SOC-style homepage updates automatically --
   // security posture, system telemetry, and the live scan feed all poll on
   // the same cadence rather than requiring a manual refresh.
   useEffect(() => {
+    let cancelled = false;
     const poll = () => {
-      getDashboardStats().then(setStats).catch(() => {});
-      getSystemStats().then(setSystem).catch(() => {});
+      getDashboardStats().then((s) => { if (!cancelled) setStats(s); }).catch(() => {});
+      getSystemStats().then((s) => { if (!cancelled) setSystem(s); }).catch(() => {});
     };
     poll();
     const id = setInterval(poll, LIVE_POLL_MS);
-    return () => clearInterval(id);
+    return () => { cancelled = true; clearInterval(id); };
   }, []);
 
   const securityScore = stats ? Math.max(0, Math.round(100 - stats.average_risk_percent)) : 0;

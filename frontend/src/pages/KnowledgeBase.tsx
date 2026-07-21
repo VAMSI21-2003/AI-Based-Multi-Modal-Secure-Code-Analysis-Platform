@@ -17,7 +17,11 @@ export default function KnowledgeBase() {
   const highlightId = params.get("cwe");
   const refs = useRef<Record<string, HTMLDivElement | null>>({});
 
-  useEffect(() => { getKnowledgeBase().then(setEntries); }, []);
+  useEffect(() => {
+    let cancelled = false;
+    getKnowledgeBase().then((e) => { if (!cancelled) setEntries(e); });
+    return () => { cancelled = true; };
+  }, []);
 
   useEffect(() => {
     if (highlightId && refs.current[highlightId]) {

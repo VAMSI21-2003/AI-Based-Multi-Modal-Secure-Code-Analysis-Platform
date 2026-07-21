@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { Link } from "react-router-dom";
 import {
   Search, Download, Trash2, ArrowUpDown, ChevronLeft, ChevronRight, History as HistoryIcon, Eye,
@@ -31,13 +31,24 @@ export default function HistoryPage() {
   const [editingTagsFor, setEditingTagsFor] = useState<string | null>(null);
   const [tagDraft, setTagDraft] = useState("");
 
+  // Rapid filter changes (e.g. typing in the search box) can fire several
+  // overlapping getHistory() requests -- a monotonic sequence number (same
+  // pattern already used in LiveIDE.tsx's live-scan debounce) ensures only
+  // the LATEST request's response is ever applied, regardless of the order
+  // responses actually arrive back in.
+  const loadSeqRef = useRef(0);
+
   const load = useCallback(() => {
+    const seq = ++loadSeqRef.current;
     setLoading(true);
     getHistory({
       search: search || undefined, risk_level: riskLevel || undefined, verdict: verdict || undefined,
       project: project || undefined, pinned: pinnedOnly || undefined, tag: tagFilter || undefined,
       sort, order, limit: PAGE_SIZE, offset,
-    }).then((d) => { setResults(d.results); setTotal(d.total); setProjects(d.projects); setAllTags(d.tags || []); }).finally(() => setLoading(false));
+    }).then((d) => {
+      if (seq !== loadSeqRef.current) return;
+      setResults(d.results); setTotal(d.total); setProjects(d.projects); setAllTags(d.tags || []);
+    }).finally(() => { if (seq === loadSeqRef.current) setLoading(false); });
   }, [search, riskLevel, verdict, project, pinnedOnly, tagFilter, sort, order, offset]);
 
   useEffect(() => { load(); }, [load]);

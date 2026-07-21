@@ -50,13 +50,15 @@ export default function KnowledgeGraph() {
   const [selected, setSelected] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!batchId) { getBatches().then(setBatches); return; }
+    let cancelled = false;
+    if (!batchId) { getBatches().then((b) => { if (!cancelled) setBatches(b); }); return () => { cancelled = true; }; }
     setLoading(true);
     setError(null);
     getKnowledgeGraph(batchId)
-      .then(setData)
-      .catch((e) => setError(e?.response?.data?.detail || e.message || "Failed to load knowledge graph"))
-      .finally(() => setLoading(false));
+      .then((d) => { if (!cancelled) setData(d); })
+      .catch((e) => { if (!cancelled) setError(e?.response?.data?.detail || e.message || "Failed to load knowledge graph"); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
   }, [batchId]);
 
   const toggleKind = (k: KnowledgeNodeKind) => {

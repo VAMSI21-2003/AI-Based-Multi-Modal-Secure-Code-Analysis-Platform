@@ -15,7 +15,11 @@ export default function ExportCenter() {
   const [scans, setScans] = useState<ScanResult[] | null>(null);
   const [selected, setSelected] = useState<string>("");
 
-  useEffect(() => { getHistory({ limit: 50, sort: "date", order: "desc" }).then((d) => setScans(d.results)); }, []);
+  useEffect(() => {
+    let cancelled = false;
+    getHistory({ limit: 50, sort: "date", order: "desc" }).then((d) => { if (!cancelled) setScans(d.results); });
+    return () => { cancelled = true; };
+  }, []);
 
   useEffect(() => { if (scans && scans.length > 0 && !selected) setSelected(scans[0].id); }, [scans, selected]);
 

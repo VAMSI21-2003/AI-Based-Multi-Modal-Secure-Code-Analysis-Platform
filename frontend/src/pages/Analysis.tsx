@@ -24,13 +24,18 @@ export default function Analysis() {
 
   useEffect(() => {
     if (!scan) return;
+    let cancelled = false;
     getHistory({ project: scan.project_name, sort: "date", order: "asc", limit: 30 })
-      .then((d) => setTimeline(d.results.map((r: any) => ({
-        date: new Date(r.created_at).toLocaleDateString(undefined, { month: "short", day: "numeric" }),
-        probability: r.vuln_probability,
-        filename: r.filename,
-      }))))
+      .then((d) => {
+        if (cancelled) return;
+        setTimeline(d.results.map((r: any) => ({
+          date: new Date(r.created_at).toLocaleDateString(undefined, { month: "short", day: "numeric" }),
+          probability: r.vuln_probability,
+          filename: r.filename,
+        })));
+      })
       .catch(() => {});
+    return () => { cancelled = true; };
   }, [scan]);
 
   if (!scanId) {

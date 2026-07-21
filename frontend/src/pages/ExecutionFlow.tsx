@@ -21,7 +21,12 @@ export default function ExecutionFlow() {
   const [step, setStep] = useState(0);
   const [playing, setPlaying] = useState(false);
 
-  useEffect(() => { if (scanId) getCodeIntelligence(scanId).then(setIntel); }, [scanId]);
+  useEffect(() => {
+    if (!scanId) return;
+    let cancelled = false;
+    getCodeIntelligence(scanId).then((i) => { if (!cancelled) setIntel(i); });
+    return () => { cancelled = true; };
+  }, [scanId]);
 
   const stages = scan && detail && intel ? [
     {

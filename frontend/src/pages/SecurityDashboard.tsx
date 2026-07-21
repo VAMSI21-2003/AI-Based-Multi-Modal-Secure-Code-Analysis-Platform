@@ -21,10 +21,12 @@ export default function SecurityDashboard() {
   const [overview, setOverview] = useState<any>(null);
 
   useEffect(() => {
-    getDashboardStats().then(setStats);
-    getSecurityTrends(14).then(setTrend);
-    getFeatureRadarAvg().then(setRadar);
-    getAnalyticsOverview().then(setOverview);
+    let cancelled = false;
+    getDashboardStats().then((d) => { if (!cancelled) setStats(d); });
+    getSecurityTrends(14).then((t) => { if (!cancelled) setTrend(t); });
+    getFeatureRadarAvg().then((r) => { if (!cancelled) setRadar(r); });
+    getAnalyticsOverview().then((o) => { if (!cancelled) setOverview(o); });
+    return () => { cancelled = true; };
   }, []);
 
   if (!stats || !trend || !radar || !overview) {

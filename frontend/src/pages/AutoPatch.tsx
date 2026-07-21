@@ -15,7 +15,9 @@ export default function AutoPatch() {
 
   useEffect(() => {
     if (!scanId) return;
-    getPatches(scanId).then(setPatches);
+    let cancelled = false;
+    getPatches(scanId).then((p) => { if (!cancelled) setPatches(p); });
+    return () => { cancelled = true; };
   }, [scanId]);
 
   if (!scanId) {

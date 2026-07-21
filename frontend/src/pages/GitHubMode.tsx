@@ -31,14 +31,16 @@ export default function GitHubMode() {
 
   useEffect(() => {
     if (!batchId) return;
+    let cancelled = false;
     setError(null);
     Promise.all([getProjectSummary(batchId), getGitHubCommits(batchId)])
-      .then(([s, c]) => { setSummary(s); setCommits(c); })
-      .catch((e) => setError(e?.response?.data?.detail || e.message || "Failed to load repository scan"));
+      .then(([s, c]) => { if (!cancelled) { setSummary(s); setCommits(c); } })
+      .catch((e) => { if (!cancelled) setError(e?.response?.data?.detail || e.message || "Failed to load repository scan"); });
     // Meta (scan scope/completeness) is fetched separately and allowed to fail
     // silently (404 for batches scanned before this field existed) -- it's an
     // enhancement to the page, not a prerequisite for the page to load.
-    getGitHubBatchMeta(batchId).then(setMeta).catch(() => setMeta(null));
+    getGitHubBatchMeta(batchId).then((m) => { if (!cancelled) setMeta(m); }).catch(() => { if (!cancelled) setMeta(null); });
+    return () => { cancelled = true; };
   }, [batchId]);
 
   const onScan = async () => {

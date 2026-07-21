@@ -19,12 +19,14 @@ export default function ModelComparison() {
 
   useEffect(() => {
     if (!scanId) return;
+    let cancelled = false;
     setLoading(true);
     setError(null);
     getModelComparison(scanId)
-      .then(setData)
-      .catch((e) => setError(e?.response?.data?.detail || e.message || "Failed to compare models"))
-      .finally(() => setLoading(false));
+      .then((d) => { if (!cancelled) setData(d); })
+      .catch((e) => { if (!cancelled) setError(e?.response?.data?.detail || e.message || "Failed to compare models"); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
   }, [scanId]);
 
   if (!scanId) {

@@ -26,14 +26,17 @@ export default function Presentation() {
   const [perf, setPerf] = useState<any>(null);
 
   useEffect(() => {
+    let cancelled = false;
     getDashboardStats().then((d) => {
+      if (cancelled) return;
       if (d.recent_scans.length > 0) {
         const id = d.recent_scans[0].id;
-        getScan(id).then(setLatestScan);
-        getScanDetail(id).then(setDetail);
+        getScan(id).then((s) => { if (!cancelled) setLatestScan(s); });
+        getScanDetail(id).then((s) => { if (!cancelled) setDetail(s); });
       }
     });
-    getModelPerformance().then(setPerf);
+    getModelPerformance().then((p) => { if (!cancelled) setPerf(p); });
+    return () => { cancelled = true; };
   }, []);
 
   const slides = [

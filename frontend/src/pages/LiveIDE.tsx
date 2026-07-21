@@ -68,14 +68,17 @@ export default function LiveIDE() {
   // starts live-analyzing immediately, instead of the placeholder snippet.
   useEffect(() => {
     if (!openScanId) return;
+    let cancelled = false;
     setLoadingScan(true);
     getScan(openScanId)
       .then((s) => {
+        if (cancelled) return;
         if (s.code) setCodeA(s.code);
         setLanguage(/\.(cpp|cc|cxx|hpp|hh)$/i.test(s.filename) ? "cpp" : "c");
       })
       .catch(() => {})
-      .finally(() => setLoadingScan(false));
+      .finally(() => { if (!cancelled) setLoadingScan(false); });
+    return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [openScanId]);
 

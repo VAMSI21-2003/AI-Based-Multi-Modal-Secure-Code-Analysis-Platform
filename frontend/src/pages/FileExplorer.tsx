@@ -60,8 +60,14 @@ export default function FileExplorer() {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
   useEffect(() => {
-    if (!batchId) { getBatches().then(setBatches); return; }
-    getProjectSummary(batchId).then((d) => { setData(d); setExpanded(new Set(["__root__"])); });
+    let cancelled = false;
+    if (!batchId) { getBatches().then((b) => { if (!cancelled) setBatches(b); }); return () => { cancelled = true; }; }
+    getProjectSummary(batchId).then((d) => {
+      if (cancelled) return;
+      setData(d);
+      setExpanded(new Set(["__root__"]));
+    });
+    return () => { cancelled = true; };
   }, [batchId]);
 
   const tree = useMemo(() => (data ? buildTree(data.files) : null), [data]);

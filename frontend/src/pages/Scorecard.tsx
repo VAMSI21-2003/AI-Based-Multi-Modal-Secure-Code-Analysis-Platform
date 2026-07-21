@@ -16,7 +16,11 @@ const FACTOR_ICON: Record<string, any> = {
 export default function Scorecard() {
   const [data, setData] = useState<ScorecardType | null>(null);
 
-  useEffect(() => { getScorecard().then(setData); }, []);
+  useEffect(() => {
+    let cancelled = false;
+    getScorecard().then((d) => { if (!cancelled) setData(d); });
+    return () => { cancelled = true; };
+  }, []);
 
   if (!data) return <PageShell title="Security Scorecard" subtitle="One weighted, audit-style grade for the whole codebase"><Spinner label="Computing scorecard..." /></PageShell>;
 

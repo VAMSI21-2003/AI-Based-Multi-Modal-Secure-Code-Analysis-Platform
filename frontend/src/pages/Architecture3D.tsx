@@ -33,8 +33,10 @@ export default function Architecture3D() {
   const pulseTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
-    getModelArchitecture().then(setArch).catch(() => {});
-    getModelPerformance().then(setPerf).catch(() => {});
+    let cancelled = false;
+    getModelArchitecture().then((a) => { if (!cancelled) setArch(a); }).catch(() => {});
+    getModelPerformance().then((p) => { if (!cancelled) setPerf(p); }).catch(() => {});
+    return () => { cancelled = true; };
   }, []);
 
   // Digital Twin (Phase 7): the ML node pulses with the verdict of whatever
@@ -44,8 +46,10 @@ export default function Architecture3D() {
   // on page load), the current prediction visibly travels through every
   // stage of the real pipeline, one at a time, in order.
   useEffect(() => {
+    let cancelled = false;
     const poll = () => {
       getDashboardStats().then((d) => {
+        if (cancelled) return;
         const top = d.recent_scans[0];
         if (!top) return;
         setLastScan({ id: top.id, filename: top.filename, verdict: top.verdict });
@@ -60,7 +64,7 @@ export default function Architecture3D() {
     };
     poll();
     const id = setInterval(poll, LIVE_POLL_MS);
-    return () => { clearInterval(id); if (pulseTimeoutRef.current) clearTimeout(pulseTimeoutRef.current); };
+    return () => { cancelled = true; clearInterval(id); if (pulseTimeoutRef.current) clearTimeout(pulseTimeoutRef.current); };
   }, []);
 
   useEffect(() => {

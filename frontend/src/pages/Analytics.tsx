@@ -19,10 +19,12 @@ export default function Analytics() {
   const [pca, setPca] = useState<any>(null);
 
   useEffect(() => {
-    getAnalyticsOverview().then(setOverview);
-    getModelPerformance().then(setModelPerf);
-    getDatasetStats().then(setDatasetStats);
-    getPcaBackground().then(setPca);
+    let cancelled = false;
+    getAnalyticsOverview().then((o) => { if (!cancelled) setOverview(o); });
+    getModelPerformance().then((p) => { if (!cancelled) setModelPerf(p); });
+    getDatasetStats().then((d) => { if (!cancelled) setDatasetStats(d); });
+    getPcaBackground().then((p) => { if (!cancelled) setPca(p); });
+    return () => { cancelled = true; };
   }, []);
 
   if (!overview || !modelPerf || !datasetStats) {

@@ -13,8 +13,10 @@ export default function Reports() {
   const [batches, setBatches] = useState<any[] | null>(null);
 
   useEffect(() => {
-    getHistory({ limit: 12, sort: "date", order: "desc" }).then((d) => setScans(d.results));
-    getBatches().then(setBatches);
+    let cancelled = false;
+    getHistory({ limit: 12, sort: "date", order: "desc" }).then((d) => { if (!cancelled) setScans(d.results); });
+    getBatches().then((b) => { if (!cancelled) setBatches(b); });
+    return () => { cancelled = true; };
   }, []);
 
   return (

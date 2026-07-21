@@ -30,12 +30,14 @@ export default function CodeExplanation() {
 
   useEffect(() => {
     if (!scanId) return;
+    let cancelled = false;
     setLoading(true);
     setError(null);
     getCodeIntelligence(scanId, cfgFn)
-      .then(setData)
-      .catch((e) => setError(e?.response?.data?.detail || e.message || "Failed to analyse code"))
-      .finally(() => setLoading(false));
+      .then((d) => { if (!cancelled) setData(d); })
+      .catch((e) => { if (!cancelled) setError(e?.response?.data?.detail || e.message || "Failed to analyse code"); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
   }, [scanId, cfgFn]);
 
   useEffect(() => { setCfgFn(undefined); }, [scanId]);

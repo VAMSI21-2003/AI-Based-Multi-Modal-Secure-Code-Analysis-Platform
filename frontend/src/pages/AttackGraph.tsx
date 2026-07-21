@@ -14,7 +14,9 @@ export default function AttackGraph() {
 
   useEffect(() => {
     if (!scanId) return;
-    getCodeIntelligence(scanId).then(setIntel);
+    let cancelled = false;
+    getCodeIntelligence(scanId).then((i) => { if (!cancelled) setIntel(i); });
+    return () => { cancelled = true; };
   }, [scanId]);
 
   if (!scanId) {

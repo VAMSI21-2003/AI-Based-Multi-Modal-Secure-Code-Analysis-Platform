@@ -17,7 +17,11 @@ export default function Explainability() {
   const { scanId, scan, detail, loading, error } = useActiveScan();
   const [curves, setCurves] = useState<EvalCurves | null>(null);
 
-  useEffect(() => { getEvalCurves().then(setCurves).catch(() => {}); }, []);
+  useEffect(() => {
+    let cancelled = false;
+    getEvalCurves().then((c) => { if (!cancelled) setCurves(c); }).catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
 
   if (!scanId) {
     return (

@@ -24,16 +24,18 @@ export default function DependencyGraphPage() {
   const [view, setView] = useState<"files" | "functions">("files");
 
   useEffect(() => {
+    let cancelled = false;
     if (!batchId) {
-      getBatches().then(setBatches);
-      return;
+      getBatches().then((b) => { if (!cancelled) setBatches(b); });
+      return () => { cancelled = true; };
     }
     setLoading(true);
     setError(null);
     getDependencyGraph(batchId)
-      .then(setData)
-      .catch((e) => setError(e?.response?.data?.detail || e.message || "Failed to load dependency graph"))
-      .finally(() => setLoading(false));
+      .then((d) => { if (!cancelled) setData(d); })
+      .catch((e) => { if (!cancelled) setError(e?.response?.data?.detail || e.message || "Failed to load dependency graph"); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
   }, [batchId]);
 
   if (!batchId) {

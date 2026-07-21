@@ -18,7 +18,11 @@ const ICONS: Record<string, any> = {
 export default function Gamification() {
   const [data, setData] = useState<GamificationStatus | null>(null);
 
-  useEffect(() => { getGamificationStatus().then(setData); }, []);
+  useEffect(() => {
+    let cancelled = false;
+    getGamificationStatus().then((d) => { if (!cancelled) setData(d); });
+    return () => { cancelled = true; };
+  }, []);
 
   if (!data) {
     return <PageShell title="Security Gamification" subtitle="Real achievements, earned from real scan history"><Spinner label="Tallying achievements..." /></PageShell>;

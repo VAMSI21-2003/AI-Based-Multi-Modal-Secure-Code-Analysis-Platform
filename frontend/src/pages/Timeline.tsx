@@ -18,8 +18,10 @@ export default function Timeline() {
   const [projects, setProjects] = useState<string[]>([]);
 
   useEffect(() => {
+    let cancelled = false;
     getHistory({ limit: 200, sort: "date", order: "desc", project: project || undefined })
-      .then((d) => { setScans(d.results); setProjects(d.projects); });
+      .then((d) => { if (!cancelled) { setScans(d.results); setProjects(d.projects); } });
+    return () => { cancelled = true; };
   }, [project]);
 
   const chartData = useMemo(() => {

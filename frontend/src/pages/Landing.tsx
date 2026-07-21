@@ -35,8 +35,10 @@ export default function Landing() {
   const [perf, setPerf] = useState<any>(null);
 
   useEffect(() => {
-    getDashboardStats().then(setStats).catch(() => {});
-    getModelPerformance().then(setPerf).catch(() => {});
+    let cancelled = false;
+    getDashboardStats().then((d) => { if (!cancelled) setStats(d); }).catch(() => {});
+    getModelPerformance().then((p) => { if (!cancelled) setPerf(p); }).catch(() => {});
+    return () => { cancelled = true; };
   }, []);
 
   return (

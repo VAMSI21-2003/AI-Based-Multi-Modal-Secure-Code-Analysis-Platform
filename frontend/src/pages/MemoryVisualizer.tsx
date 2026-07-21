@@ -12,7 +12,12 @@ export default function MemoryVisualizer() {
   const { scanId, scan, loading } = useActiveScan();
   const [intel, setIntel] = useState<CodeIntelligence | null>(null);
 
-  useEffect(() => { if (scanId) getCodeIntelligence(scanId).then(setIntel); }, [scanId]);
+  useEffect(() => {
+    if (!scanId) return;
+    let cancelled = false;
+    getCodeIntelligence(scanId).then((i) => { if (!cancelled) setIntel(i); });
+    return () => { cancelled = true; };
+  }, [scanId]);
 
   if (!scanId) {
     return (
