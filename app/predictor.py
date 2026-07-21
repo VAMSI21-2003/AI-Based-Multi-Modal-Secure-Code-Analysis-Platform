@@ -20,6 +20,7 @@
 #   6. demo_predict(code)               -- Heuristic fallback when no model
 # =============================================================================
 
+import logging
 import os
 import numpy as np
 
@@ -30,6 +31,8 @@ from utils import (
     build_feature_vector,
     get_verdict,
 )
+
+logger = logging.getLogger(__name__)
 
 
 # ── SECTION 1: MODEL PATH RESOLUTION ─────────────────────────────────────────
@@ -106,7 +109,7 @@ def load_xgboost_model(path: str = XGB_MODEL_PATH):
     except Exception as e:
         # If any error occurs (import error, corrupted file, etc.), return None.
         # The app will fall back to demo mode.
-        print(f"[predictor] Could not load XGBoost model: {e}")
+        logger.warning("Could not load XGBoost model: %s", e)
         return None
 
 
@@ -138,7 +141,7 @@ def load_rf_model(path: str = RF_MODEL_PATH):
         return model
 
     except Exception as e:
-        print(f"[predictor] Could not load Random Forest model: {e}")
+        logger.warning("Could not load Random Forest model: %s", e)
         return None
 
 
@@ -187,7 +190,7 @@ def load_codebert_components():
         return tokenizer, model
 
     except Exception as e:
-        print(f"[predictor] Could not load CodeBERT: {e}")
+        logger.warning("Could not load CodeBERT: %s", e)
         return None, None
 
 
@@ -268,7 +271,7 @@ def extract_codebert_embedding(code: str, tokenizer, model) -> np.ndarray:
         return cls_embedding.cpu().numpy()   # shape: (768,)
 
     except Exception as e:
-        print(f"[predictor] CodeBERT inference failed: {e}")
+        logger.warning("CodeBERT inference failed: %s", e)
         # Return a zero vector as fallback so the rest of the pipeline continues
         return np.zeros(768, dtype=np.float64)
 

@@ -25,6 +25,12 @@ Forest** models. FastAPI backend, React + Vite frontend. See
   a **stopgap**, not the real fix. The proper fix for very large repos is an
   async job (submit → poll status/progress → fetch result) instead of one
   long blocking HTTP request; out of scope for now.
+- **`backend/.env.example`** — `CORS_ALLOWED_ORIGINS` (comma-separated,
+  defaults to the Vite dev server / docker-compose ports if unset),
+  `SECURECODE_DB_PATH` (override the SQLite data file location),
+  `SCAN_BLOCKING` (CI-only, see `docs/CI_CD.md`), `HF_TOKEN` (optional,
+  raises HuggingFace's download rate limit for the CodeBERT weights),
+  `LOG_LEVEL` (default `INFO`; see `backend/logging_config.py`).
 
 ---
 
