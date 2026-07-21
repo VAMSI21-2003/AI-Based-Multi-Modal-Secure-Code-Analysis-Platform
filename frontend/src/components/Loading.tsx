@@ -8,7 +8,7 @@ export function Spinner({ label }: { label?: string }) {
         <span className="absolute inset-0 rounded-full border-2 border-transparent border-t-(--accent) animate-spin" />
         <ShieldCheck size={18} className="text-(--accent) animate-pulse-soft" />
       </div>
-      {label && <div className="text-sm">{label}</div>}
+      {label && <div className="text-sm text-(--text-secondary)">{label}</div>}
     </div>
   );
 }

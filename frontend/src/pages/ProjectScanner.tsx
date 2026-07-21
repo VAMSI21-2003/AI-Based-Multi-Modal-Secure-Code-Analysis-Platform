@@ -24,16 +24,24 @@ export default function ProjectScanner() {
   const [batches, setBatches] = useState<any[] | null>(null);
 
   useEffect(() => {
+    let cancelled = false;
     if (!batchId) {
-      getBatches().then(setBatches);
-      return;
+      getBatches().then((b) => { if (!cancelled) setBatches(b); });
+      return () => { cancelled = true; };
     }
     setLoading(true);
     setError(null);
     getProjectSummary(batchId)
-      .then(setData)
-      .catch((e) => setError(e?.response?.data?.detail || e.message || "Failed to load project"))
-      .finally(() => setLoading(false));
+      .then((d) => { if (!cancelled) setData(d); })
+      .catch((e) => { if (!cancelled) setError(e?.response?.data?.detail || e.message || "Failed to load project"); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    // Without this guard, quickly switching batches (e.g. clicking two
+    // project cards in a row) could let an earlier, slower request for a
+    // DIFFERENT batch resolve after the current one and overwrite this
+    // page with the wrong project's numbers -- reproduced while auditing
+    // this page (stat tiles briefly showed 0 / mismatched values after
+    // fast navigation between batches).
+    return () => { cancelled = true; };
   }, [batchId]);
 
   if (!batchId) {
