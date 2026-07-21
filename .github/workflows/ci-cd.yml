@@ -14,7 +14,8 @@
 #                          |
 #                          v
 #                   security-scan
-#              (only runs if BOTH jobs above passed)
+#         (only on pull_request/workflow_dispatch, and only
+#          if BOTH jobs above passed -- see docs/CI_CD.md #2/#4)
 #                          |
 #                          v
 #                   final-status
@@ -32,10 +33,10 @@ on:
   pull_request:
   workflow_dispatch:
     inputs:
-      strict_security_gate:
-        description: "Fail the security-scan job on CRITICAL findings (unchecking runs report-only, for a guaranteed all-green demo run)"
+      scan_blocking:
+        description: "Fail the job if a CRITICAL finding is present (default: report-only, non-blocking -- see docs/CI_CD.md #5)"
         type: boolean
-        default: true
+        default: false
 
 jobs:
   backend-validation:
@@ -126,10 +127,29 @@ jobs:
   security-scan:
     name: Security scan
     needs: [backend-validation, frontend-validation]
+    # Only on a PR (changed-files scan) or a manual run (full-repo scan) --
+    # deliberately NOT on every push to main. See docs/CI_CD.md #2 for why
+    # this is an honest scope limitation, not an oversight.
+    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+      pull-requests: write
+    env:
+      # Non-blocking by default (see docs/CI_CD.md #5). A pull_request run
+      # reads the repo variable SCAN_BLOCKING (Settings -> Secrets and
+      # variables -> Actions -> Variables); a manual run can override it via
+      # the workflow_dispatch input above. Either way this defaults to
+      # 'false' if nothing is set.
+      SCAN_BLOCKING: ${{ (github.event_name == 'workflow_dispatch' && github.event.inputs.scan_blocking) || vars.SCAN_BLOCKING || 'false' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          # Full history only when we need to diff against the PR base --
+          # a shallow clone can't compute that diff.
+          fetch-depth: ${{ github.event_name == 'pull_request' && 0 || 1 }}
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -138,19 +158,36 @@ jobs:
           cache: "pip"
           cache-dependency-path: backend/requirements.txt
 
+      - name: Cache CodeBERT weights (~1GB, avoids re-downloading from HuggingFace every run)
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: codebert-base-${{ runner.os }}-${{ hashFiles('backend/requirements.txt') }}
+
       - name: Install backend dependencies
         run: pip install -r backend/requirements.txt
 
-      - name: Run security scan (real CodeBERT + AST + Metrics + XGBoost pipeline)
-        working-directory: backend
-        env:
-          STRICT_GATE: ${{ github.event.inputs.strict_security_gate != 'false' }}
+      - name: Compute changed files (pull_request only)
+        if: github.event_name == 'pull_request'
         run: |
-          if [ "$STRICT_GATE" = "true" ]; then
-            python ci_scan.py --path ../demo/scan_samples --output ../security-report --fail-on CRITICAL
-          else
-            python ci_scan.py --path ../demo/scan_samples --output ../security-report --fail-on CRITICAL --no-fail
-          fi
+          git diff --name-only --diff-filter=ACMR \
+            "${{ github.event.pull_request.base.sha }}" "${{ github.event.pull_request.head.sha }}" \
+            > changed_files.txt
+          echo "Changed files in this PR:"
+          cat changed_files.txt
+
+      - name: Run security scan -- changed files only (pull_request)
+        if: github.event_name == 'pull_request'
+        working-directory: backend
+        # Exit code respects $SCAN_BLOCKING (set at job level above) --
+        # non-blocking by default. Downstream steps use if: always() so the
+        # report/SARIF/PR-comment steps still run even when this fails.
+        run: python ci_scan.py --files-from ../changed_files.txt --path .. --output ../security-report --fail-on CRITICAL
+
+      - name: Run security scan -- full repository (workflow_dispatch)
+        if: github.event_name == 'workflow_dispatch'
+        working-directory: backend
+        run: python ci_scan.py --path .. --output ../security-report --fail-on CRITICAL
 
       - name: Write scan summary
         if: always()
@@ -159,15 +196,17 @@ jobs:
             {
               echo "## SecureCode AI Security Scan"
               echo ""
-              echo "Scanned \`demo/scan_samples/\` -- see docs/CI_CD.md for why this"
-              echo "project scans a small fixture rather than the whole repository"
-              echo "(this repo's own source is Python/TypeScript, not C)."
-              echo ""
               cat security-report.md
             } >> "$GITHUB_STEP_SUMMARY"
           else
             echo "No security-report.md was generated." >> "$GITHUB_STEP_SUMMARY"
           fi
+
+      - name: Upload SARIF to the Security tab
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: security-report.sarif
 
       - name: Upload scan reports
         if: always()
@@ -177,7 +216,64 @@ jobs:
           path: |
             security-report.md
             security-report.json
+            security-report.sarif
           if-no-files-found: warn
+
+      - name: Comment on PR
+        if: always() && github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const marker = '<!-- securecode-ai-scan-comment -->';
+
+            let body = `${marker}\n## SecureCode AI -- Security Scan\n\nNo \`security-report.json\` was produced (the scan step may have failed before writing it).`;
+
+            if (fs.existsSync('security-report.json')) {
+              const r = JSON.parse(fs.readFileSync('security-report.json', 'utf8'));
+              const b = r.risk_breakdown || {};
+              body = [
+                marker,
+                '## SecureCode AI -- Security Scan',
+                '',
+                `**Files scanned:** ${r.total_files} (${r.scan_mode}) &middot; **Model mode:** \`${r.model_mode}\` &middot; **Blocking:** ${r.blocking ? 'YES' : 'NO (report-only)'}`,
+                '',
+                `**ML baseline status:** ${r.ml_baseline_status_line}`,
+                '',
+                '| Critical | High | Medium | Low | Safe |',
+                '|---|---|---|---|---|',
+                `| ${b['CRITICAL'] || 0} | ${b['HIGH RISK'] || 0} | ${b['MEDIUM RISK'] || 0} | ${b['LOW RISK'] || 0} | ${b['SAFE'] || 0} |`,
+                '',
+                r.total_files === 0
+                  ? '_No `.c`/`.cpp`/`.h` files changed in this PR._'
+                  : `See the **security-scan** job summary or the Security tab for per-file findings. Full details in the \`security-scan-report\` build artifact.`,
+                '',
+                '_This is a research-scale classifier (see docs/CI_CD.md), not a mature rule engine -- treat findings as a signal to review, not a certification._',
+              ].join('\n');
+            }
+
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            const existing = comments.find(c => c.body && c.body.includes(marker));
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body,
+              });
+            }
 
   final-status:
     name: Final status
@@ -197,7 +293,7 @@ jobs:
 
           if [ "${{ needs.backend-validation.result }}" != "success" ] || \
              [ "${{ needs.frontend-validation.result }}" != "success" ] || \
-             [ "${{ needs.security-scan.result }}" != "success" ]; then
+             ( [ "${{ needs.security-scan.result }}" != "success" ] && [ "${{ needs.security-scan.result }}" != "skipped" ] ); then
             echo "" >> "$GITHUB_STEP_SUMMARY"
             echo "**Overall: FAILED** -- see the failing job(s) above for details." >> "$GITHUB_STEP_SUMMARY"
             echo "Overall: FAILED"
