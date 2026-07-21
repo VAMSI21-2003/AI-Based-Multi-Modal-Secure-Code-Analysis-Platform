@@ -13,7 +13,14 @@ from sqlalchemy.orm import sessionmaker, declarative_base
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = os.path.join(PROJECT_ROOT, "backend", "data")
 os.makedirs(DATA_DIR, exist_ok=True)
-DB_PATH = os.path.join(DATA_DIR, "platform.db")
+
+# Overridable so the test suite can point this at a throwaway file instead of
+# the real platform database (see backend/tests/conftest.py) -- every pytest
+# run used to write permanent rows into the same platform.db the live app
+# reads from (e.g. "zip-slip-test"/"skip-reason-test" batches visible in the
+# real Dashboard/History/Reports UI). Defaults to the original path so
+# production behavior is unchanged when the env var isn't set.
+DB_PATH = os.environ.get("SECURECODE_DB_PATH") or os.path.join(DATA_DIR, "platform.db")
 
 engine = create_engine(f"sqlite:///{DB_PATH}", connect_args={"check_same_thread": False})
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
