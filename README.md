@@ -16,6 +16,18 @@ Forest** models. FastAPI backend, React + Vite frontend. See
 
 ---
 
+## Configuration
+
+- **`frontend/.env.example`** — `VITE_SCAN_TIMEOUT_MS` (default 600000 / 10
+  min): timeout for scan-triggering requests (single-file, batch/ZIP/folder,
+  GitHub repo, live editor). A large real-world repo can legitimately take
+  minutes to scan (measured: 186–249s for a 200-file GitHub scan) — this is
+  a **stopgap**, not the real fix. The proper fix for very large repos is an
+  async job (submit → poll status/progress → fetch result) instead of one
+  long blocking HTTP request; out of scope for now.
+
+---
+
 ## CI/CD
 
 Every push, pull request, and manual trigger runs the pipeline defined in
