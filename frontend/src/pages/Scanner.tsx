@@ -345,14 +345,27 @@ export default function Scanner() {
                 <div className="text-sm font-semibold">Summary</div>
                 <div className="grid grid-cols-2 gap-2 text-xs">
                   <div className="bg-(--surface-3) rounded-lg p-2.5">
+                    <div className="text-(--text-muted)">Detected</div>
+                    <div className="text-lg font-bold tabular">{batchResult.files_detected}</div>
+                  </div>
+                  <div className="bg-(--surface-3) rounded-lg p-2.5">
                     <div className="text-(--text-muted)">Scanned</div>
                     <div className="text-lg font-bold tabular">{batchResult.total_files_scanned}</div>
+                  </div>
+                  <div className="bg-(--surface-3) rounded-lg p-2.5">
+                    <div className="text-(--text-muted)">Skipped</div>
+                    <div className="text-lg font-bold tabular">{batchResult.files_skipped}</div>
                   </div>
                   <div className="bg-(--surface-3) rounded-lg p-2.5">
                     <div className="text-(--text-muted)">Vulnerable</div>
                     <div className="text-lg font-bold tabular text-(--status-critical)">{batchResult.vulnerable_count}</div>
                   </div>
                 </div>
+                {batchResult.skip_reasons.length > 0 && (
+                  <div className="text-[11px] text-(--status-warning) bg-(--status-warning)/10 rounded-lg p-2">
+                    {batchResult.skip_reasons.join("; ")}
+                  </div>
+                )}
               </div>
             )}
           </div>

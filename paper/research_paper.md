@@ -17,6 +17,32 @@
 
 ---
 
+> ## ⚠️ Erratum (added 2026-07-21) — headline metrics below are under correction
+>
+> A post-submission forensic audit (`docs/ML_FORENSIC_AUDIT_PHASE4.md`) found
+> a data-integrity bug in the feature-fusion pipeline: the three modalities
+> (AST, metrics, CodeBERT) were joined on an unstable, per-script row
+> position instead of a stable sample identifier, causing **99.35% of the
+> fused training rows to pair one function's label/AST features with a
+> different function's metrics/CodeBERT features.** The bug has been fixed
+> and verified (0 misalignments across all 27,231 rows, both models
+> retrained) — see `docs/ML_ALIGNMENT_FIX_RESULTS.md` for full details.
+>
+> **Every specific number in this paper below (F1 = 0.5673, Accuracy =
+> 61.12%, the 0.32 threshold, the ablation figures in Section 8, and the PCA
+> experiment in Section 8.x) was computed on the corrupted dataset and is
+> therefore INVALIDATED.** This is flagged explicitly here, per this
+> project's standing rule against silently altering reported research
+> claims, rather than edited in place. The corrected baseline (XGBoost F1 =
+> 0.5391, threshold = 0.26) is in `docs/ML_ALIGNMENT_FIX_RESULTS.md`; a full
+> revision of this paper's narrative and tables — including re-running the
+> ablation and PCA experiments on the corrected data, which is intentionally
+> **not yet done** pending review — is planned as a separate, explicit pass.
+> Until that revision lands, treat every quantitative claim below as
+> historical/superseded, not current.
+
+---
+
 ## Abstract
 
 Software vulnerability detection is a critical challenge in modern cybersecurity,
@@ -1088,9 +1114,18 @@ and overflowed in a callee) or from runtime conditions (e.g., environment-specif
 heap layout exploits).
 
 **CodeBERT Token Limit:** Functions exceeding 512 BPE tokens are truncated.
-Analysis of the Devign dataset shows that approximately 12% of functions exceed
-this limit. Truncation may discard the vulnerability-relevant portion of long
-functions, introducing false negatives for complex, lengthy code.
+A direct measurement on a 1,000-function random sample (seed=42) of the
+cleaned Devign dataset, using the actual tokenizer settings from both training
+and inference, found that **45.5% of functions exceed 512 tokens** — a
+substantially larger fraction than an earlier estimate of 12% cited in a prior
+draft of this work, and the correct figure to cite going forward
+(reproducible via `docs/ML_PIPELINE.md` §5). Truncation is also mildly
+asymmetric across classes: 47.6% of vulnerable functions are truncated versus
+43.6% of safe functions, meaning the semantic branch's information is
+systematically a little weaker on exactly the class this system most needs
+to detect. This is a more direct, larger-magnitude explanation for the
+CodeBERT branch's modest measured contribution (Section 8.1) than embedding
+anisotropy alone, though both mechanisms are real and independently measured.
 
 **C Language Only:** The AST parsing grammar and metric computation are
 calibrated for C. Extension to other languages would require language-specific
@@ -1110,11 +1145,15 @@ gap would require fine-tuning CodeBERT end-to-end on the vulnerability-detection
 objective rather than using it as a static feature extractor — a substantially
 larger, GPU-bound undertaking left as future work (Section 10.5).
 
-**False Negative Rate:** The model misses approximately 20.1% of vulnerabilities
-at the default 0.5 decision threshold (1,094 of 5,445 test samples). In a
-zero-tolerance security context, lowering the classification threshold would
-increase recall at the cost of additional false positives; Section 7.2
-discusses this tradeoff.
+**False Negative Rate:** At the default 0.5 decision threshold used for the
+headline metrics reported in this paper (Accuracy/Precision/Recall/F1/AUC
+above), the model misses approximately 20.1% of vulnerabilities (1,094 of
+5,445 test samples). A subsequent experiment (Section 10.6) found that a
+validation-selected threshold of 0.32 raises recall to 90.4% at the cost of
+precision falling to 48.6% (F1 0.554→0.632 on a same-hyperparameter model);
+this threshold has since been adopted for the live system's binary verdict,
+while the headline metrics in this paper remain reported at the standard 0.5
+threshold for comparability with the wider literature (Table 5).
 
 ---
 
@@ -1175,8 +1214,10 @@ Several extensions of this work present themselves as promising research directi
 
 ### 10.1 Long-Function Handling via Sliding Window CodeBERT
 
-The current 512-token CodeBERT truncation discards approximately 12% of functions
-in Devign. A hierarchical approach could split each function into overlapping
+The current 512-token CodeBERT truncation discards a substantial fraction of
+functions in Devign — measured directly at 45.5% (Section 8.5), not the 12%
+cited in an earlier draft. A hierarchical approach could split each function
+into overlapping
 512-token windows, generate embeddings for each window, and aggregate them
 (mean pooling, max pooling, or attention-weighted combination) into a single
 fixed-size representation. This would recover vulnerability signals in long,
@@ -1224,14 +1265,21 @@ literature baselines in Table 5. The cost is significantly higher GPU
 requirements and training time than the current frozen-feature pipeline, which
 is why it is scoped as future work rather than attempted in this study.
 
-### 10.6 Decision Threshold Optimisation
+### 10.6 Decision Threshold Optimisation (completed in a later iteration)
 
-The current system uses the default classification threshold of 0.5. Operating
-point optimisation using the Precision-Recall curve would allow deployment teams
-to select thresholds matched to their specific risk tolerance. For example, a
-threshold selected to achieve Recall = 0.95 (missing only 5% of vulnerabilities)
-could be provided alongside the corresponding Precision, enabling informed
-trade-off decisions in deployment.
+Unlike the other items in this section, this one has since been carried out
+rather than left as pure future work. A held-out validation set was carved
+out of the training portion only (the test set used for this paper's
+headline metrics was never touched during threshold selection), thresholds
+from 0.05–0.95 were swept on that validation set, and the F1-maximizing
+threshold (0.32) was selected and evaluated exactly once on the untouched
+test set: F1 rose from 0.554 to 0.632 (accuracy 60.2%→52.0%, precision
+56.6%→48.6%, recall 54.3%→90.4%), with AUC unchanged at 0.638, confirming the
+gain is a genuine recalibration of the decision boundary rather than a
+different model. This threshold is now used for the deployed system's binary
+verdict; the headline metrics reported earlier in this paper are kept at the
+standard 0.5 threshold for comparability with prior literature (Table 5).
+Full methodology and results: `docs/ML_EXPERIMENTS.md`.
 
 ### 10.7 Line-Level Vulnerability Localisation
 

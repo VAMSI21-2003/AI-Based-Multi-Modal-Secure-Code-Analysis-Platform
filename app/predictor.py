@@ -50,6 +50,23 @@ MODELS_DIR   = os.path.join(PROJECT_ROOT, "models")
 RF_MODEL_PATH  = os.path.join(MODELS_DIR, "random_forest.joblib")
 XGB_MODEL_PATH = os.path.join(MODELS_DIR, "xgboost.json")
 
+# Decision threshold for the binary VULNERABLE/NOT VULNERABLE verdict.
+#
+# RE-SELECTED after the Phase 4 feature-fusion alignment fix
+# (docs/ML_FORENSIC_AUDIT_PHASE4.md) -- the dataset used to select the
+# previous value (0.32) was corrupted (99.35% of rows paired the wrong
+# function's CodeBERT/metrics features with the label/AST features), so
+# that number is INVALIDATED, not merely superseded. This is a fresh
+# result on the corrected dataset, not a tweak of the old one.
+#
+# Same methodology as before (train/validation/test split, test set
+# touched exactly once at the end) -- see docs/ML_EXPERIMENTS.md
+# Experiment 1. On the corrected data: F1 0.5315 -> 0.6361 relative to the
+# naive default of 0.5, trading precision (54.5% -> 47.2%) for a much
+# higher recall (51.8% -> 97.7%) -- an even more aggressive
+# recall-favoring operating point than the old (invalidated) 0.32 value.
+VULNERABILITY_THRESHOLD = 0.26
+
 
 # ── FUNCTION 1: load_xgboost_model ───────────────────────────────────────────
 
@@ -308,13 +325,13 @@ def predict_with_model(code: str, model, model_name: str,
 
     # ── Step 5: Run the classifier ────────────────────────────────────────────
     #
-    # predict() returns the class label: 0 (safe) or 1 (vulnerable).
-    # predict_proba() returns a probability array: [[prob_safe, prob_vuln]]
-    # We take [0, 1] to get the probability of being vulnerable.
+    # predict_proba() returns a probability array: [[prob_safe, prob_vuln]].
+    # The class label is derived from VULNERABILITY_THRESHOLD (see above),
+    # not from model.predict()'s implicit, untuned 0.5 cutoff.
 
-    prediction       = int(model.predict(X)[0])          # 0 or 1
     probabilities    = model.predict_proba(X)[0]          # [prob_0, prob_1]
     vuln_probability = float(probabilities[1])            # probability of class 1
+    prediction       = int(vuln_probability >= VULNERABILITY_THRESHOLD)  # 0 or 1
 
     # ── Step 6: Build verdict dictionary ─────────────────────────────────────
     result = get_verdict(prediction, vuln_probability, model_name)

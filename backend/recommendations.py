@@ -10,25 +10,40 @@
 
 import re
 
+import patch_safety
+
+# Each entry: (pattern, dest_group_index, safe_replacer, unsafe_replacer, description).
+# `safe_replacer`/`unsafe_replacer` both take the match object; `unsafe_replacer`
+# is used instead of a fabricated sizeof(dest) whenever patch_safety determines
+# the destination's capacity is NOT statically knowable from the code being
+# rewritten (see patch_safety.py for why this distinction is required).
 AUTO_FIXES = [
     (
         re.compile(r"\bstrcpy\s*\(\s*([^,]+?)\s*,\s*([^)]+?)\s*\)"),
+        1,
         lambda m: f"strncpy({m.group(1)}, {m.group(2)}, sizeof({m.group(1)}) - 1); {m.group(1)}[sizeof({m.group(1)}) - 1] = '\\0'",
+        lambda m: f"strncpy({m.group(1)}, {m.group(2)}, dest_size - 1); {m.group(1)}[dest_size - 1] = '\\0';  /* TODO: set dest_size to {m.group(1)}'s real capacity */",
         "Replaced strcpy() with a bounds-checked strncpy() + explicit NUL termination.",
     ),
     (
         re.compile(r"\bstrcat\s*\(\s*([^,]+?)\s*,\s*([^)]+?)\s*\)"),
+        1,
         lambda m: f"strncat({m.group(1)}, {m.group(2)}, sizeof({m.group(1)}) - strlen({m.group(1)}) - 1)",
+        lambda m: f"strncat({m.group(1)}, {m.group(2)}, dest_size - strlen({m.group(1)}) - 1)  /* TODO: set dest_size to {m.group(1)}'s real capacity */",
         "Replaced strcat() with a bounds-checked strncat().",
     ),
     (
         re.compile(r"\bgets\s*\(\s*([^)]+?)\s*\)"),
+        1,
         lambda m: f"fgets({m.group(1)}, sizeof({m.group(1)}), stdin)",
+        lambda m: f"fgets({m.group(1)}, dest_size, stdin)  /* TODO: set dest_size to {m.group(1)}'s real capacity */",
         "Replaced gets() with fgets() (bounded read).",
     ),
     (
         re.compile(r"\bsprintf\s*\(\s*([^,]+?)\s*,"),
+        1,
         lambda m: f"snprintf({m.group(1)}, sizeof({m.group(1)}),",
+        lambda m: f"snprintf({m.group(1)}, dest_size,  /* TODO: set dest_size to {m.group(1)}'s real capacity */",
         "Replaced sprintf() with snprintf() (bounded formatting).",
     ),
 ]
@@ -83,15 +98,46 @@ def suggest_secure_rewrite(code: str) -> dict:
     Returns the rewritten code plus a change-log. This is a best-effort,
     rule-based rewrite (not a guarantee of correctness) -- always flagged
     as such to the user.
+
+    Each substitution is checked against patch_safety.destination_capacity_is_known()
+    on the ORIGINAL code (not the partially-rewritten string) before deciding
+    whether to emit a real sizeof(dest)-based bound or an honestly-labeled
+    dest_size placeholder -- see patch_safety.py for why this matters.
     """
+    original = code
     rewritten = code
     changes = []
-    for pattern, replacer, description in AUTO_FIXES:
-        if pattern.search(rewritten):
-            rewritten, count = pattern.subn(replacer, rewritten)
-            if count:
-                changes.append({"description": description, "occurrences": count})
-    return {"rewritten_code": rewritten, "changes": changes, "changed": len(changes) > 0}
+    any_unsafe = False
+    for pattern, dest_group, safe_replacer, unsafe_replacer, description in AUTO_FIXES:
+        matches = list(pattern.finditer(rewritten))
+        if not matches:
+            continue
+        count = 0
+        unsafe_count = 0
+
+        def _replace(m):
+            nonlocal count, unsafe_count
+            count += 1
+            dest = m.group(dest_group)
+            if patch_safety.destination_capacity_is_known(original, dest):
+                return safe_replacer(m)
+            unsafe_count += 1
+            return unsafe_replacer(m)
+
+        rewritten = pattern.sub(_replace, rewritten)
+        if count:
+            label = description
+            if unsafe_count:
+                any_unsafe = True
+                label += (
+                    f" ({unsafe_count} of {count} occurrence(s) use a dest_size PLACEHOLDER, not a real size -- "
+                    "destination capacity could not be determined from this code; see patch_safety notes)"
+                )
+            changes.append({"description": label, "occurrences": count})
+    return {
+        "rewritten_code": rewritten, "changes": changes, "changed": len(changes) > 0,
+        "requires_manual_sizing": any_unsafe,
+    }
 
 
 def generate_recommendations(ast_feats: dict, metric_feats: dict, line_risks: list) -> list:

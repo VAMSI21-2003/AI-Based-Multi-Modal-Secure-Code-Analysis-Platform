@@ -671,7 +671,15 @@ print("  Computing metrics for every function...")
 print("  Progress shown every 1,000 samples.")
 print()
 
+if "original_id" not in df.columns:
+    print("  ERROR: input file has no 'original_id' column.")
+    print("  Re-run src/preprocessing/preprocess_dataset.py (Day 4) first --")
+    print("  it must be regenerated to assign this stable ID (see")
+    print("  docs/ML_FORENSIC_AUDIT_PHASE4.md for why this is required).")
+    sys.exit(1)
+
 all_rows = []   # will hold one dict per sample
+short_count = 0  # informational only -- these rows are still kept (Phase 4 fix)
 
 for row_index, row in df.iterrows():
 
@@ -684,9 +692,18 @@ for row_index, row in df.iterrows():
     # str() ensures it is definitely a string even if pandas read it strangely
     code_text = str(row["func"])
 
-    # ── Skip extremely short entries (safety check) ───────────────────────────
+    # NOTE (Phase 4 fix): this script used to `continue` (silently drop the
+    # row) here for anything under 10 characters -- a DIFFERENT, laxer
+    # threshold than extract_ast_features.py's 50 characters. Since each
+    # script used to assign sample_id = its own output's row position, that
+    # inconsistency silently desynced the two scripts' numbering, confirmed
+    # to affect 99.35% of the fused dataset
+    # (docs/ML_FORENSIC_AUDIT_PHASE4.md). Every row is now kept, carried
+    # through with its stable original_id; metrics are pure string
+    # operations that cannot meaningfully fail on any non-empty input, so
+    # there is no correctness reason to drop short rows here.
     if len(code_text.strip()) < 10:
-        continue
+        short_count += 1  # informational only -- row is still processed below
 
     # ── Compute all metrics for this code sample ──────────────────────────────
     metrics = extract_all_metrics(code_text)
@@ -694,6 +711,7 @@ for row_index, row in df.iterrows():
     # ── Build the output row ──────────────────────────────────────────────────
     # We keep the original columns AND add the new metric columns
     output_row = {
+        "original_id": row["original_id"],
         "func"      : row["func"],            # original code
         "target"    : row["target"],          # label (0 or 1)
         "project"   : row.get("project",   "unknown"),
@@ -703,7 +721,9 @@ for row_index, row in df.iterrows():
     all_rows.append(output_row)
 
 # Print blank line to clear the progress line
-print(f"\n  Done. Processed {len(all_rows)} samples.")
+print(f"\n  Done. Processed {len(all_rows)} samples. (Every input row is kept -- no row")
+print(f"  is dropped by this script; see Phase 4 fix notes above.)")
+print(f"  Samples under 10 chars (kept anyway): {short_count}")
 
 
 # =============================================================================

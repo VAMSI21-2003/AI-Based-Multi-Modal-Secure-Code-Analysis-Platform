@@ -39,3 +39,10 @@ security-report.json
 
 # Runtime logs
 *.log
+
+# Local pre-fix data/model snapshots (safety copies made before regenerating
+# the dataset -- large, regenerable, never meant to be committed)
+backups/
+
+# SonarQube local scan cache
+.sonar/

@@ -5,6 +5,8 @@
 # =============================================================================
 
 import io
+import os
+import re
 import zipfile
 import uuid
 
@@ -25,6 +27,14 @@ CODE_EXTENSIONS = (".c", ".h", ".cpp", ".cc", ".cxx", ".hpp")
 MAX_BATCH_FILES = 200
 MAX_FILE_SIZE = 512_000  # 500 KB per file is generous for a single function/file
 
+# Zip-bomb defense: a small, highly-compressed archive can expand to an
+# enormous number of entries or an enormous total uncompressed size. Both are
+# checked from zf.infolist() metadata BEFORE any member is decompressed/read,
+# so a malicious archive is rejected cheaply rather than after doing the
+# expensive work it was designed to trigger.
+MAX_ZIP_MEMBERS = 5_000
+MAX_ZIP_TOTAL_UNCOMPRESSED = 200_000_000  # 200 MB combined, generous for real source repos
+
 # Directories that never contain the actual shipped product -- documentation,
 # example/sample snippets, and pre-built IDE integration projects. Excluded
 # from every recursive ingestion path (batch zip/folder upload, GitHub clone,
@@ -44,6 +54,36 @@ def is_scannable_path(rel_path: str) -> bool:
         return False
     parts = {p.lower() for p in rel_path.replace("\\", "/").split("/")}
     return not (parts & EXCLUDED_DIR_NAMES)
+
+
+_DRIVE_LETTER_RE = re.compile(r"^[A-Za-z]:")
+
+
+def is_safe_archive_member_path(member_path: str) -> bool:
+    """
+    Defensive Zip Slip / path-traversal guard for ZIP archive member names.
+
+    This project never extracts ZIP entries to disk -- every member is read
+    into memory and stored as a database column (see scan_batch below), so a
+    malicious `../../etc/passwd`-style member name cannot actually escape any
+    directory today. This guard exists anyway as defense-in-depth: if the
+    ingestion path is ever changed to write to disk, this check must already
+    be in place rather than added later under pressure. Rejects:
+      - absolute POSIX paths ("/etc/passwd")
+      - absolute Windows paths ("C:\\Windows\\...")
+      - any path with a ".." traversal segment, at any depth
+    """
+    normalized = member_path.replace("\\", "/")
+    if normalized.startswith("/"):
+        return False
+    if _DRIVE_LETTER_RE.match(normalized):
+        return False
+    parts = normalized.split("/")
+    if ".." in parts:
+        return False
+    if os.path.isabs(normalized):
+        return False
+    return True
 
 
 @router.post("/code")
@@ -123,33 +163,58 @@ async def scan_batch(
     db: Session = Depends(get_db),
 ):
     batch_id = uuid.uuid4().hex[:12]
-    to_process = []  # (filename, code_text)
+    detected = []  # (filename, code_text) -- every file that passed extension/dir/size/path filtering, before the batch cap
+
+    # Real skip-reason counters -- surfaced in the response so the UI can
+    # honestly report "scanned X of Y detected files" instead of silently
+    # dropping files with no explanation (see docs/FINAL_PRODUCT_AUDIT.md).
+    skip_oversized = 0
+    skip_unsupported = 0
+    skip_unsafe_path = 0
+    skip_corrupt_zip = 0
+    skip_zip_bomb = 0
+    skip_invalid_content = 0
 
     for f in files:
         raw = await f.read()
-        if len(raw) > MAX_FILE_SIZE:
-            continue
         name = f.filename or "unknown"
         if name.lower().endswith(".zip"):
             try:
                 with zipfile.ZipFile(io.BytesIO(raw)) as zf:
-                    for info in zf.infolist():
+                    infolist = zf.infolist()
+                    if len(infolist) > MAX_ZIP_MEMBERS or sum(i.file_size for i in infolist) > MAX_ZIP_TOTAL_UNCOMPRESSED:
+                        skip_zip_bomb += 1
+                        continue
+                    for info in infolist:
                         if info.is_dir():
                             continue
+                        if not is_safe_archive_member_path(info.filename):
+                            skip_unsafe_path += 1
+                            continue
                         if not is_scannable_path(info.filename):
+                            skip_unsupported += 1
                             continue
                         if info.file_size > MAX_FILE_SIZE:
+                            skip_oversized += 1
                             continue
                         with zf.open(info) as fh:
                             content = fh.read().decode("utf-8", errors="replace")
-                        to_process.append((info.filename, content))
+                        detected.append((info.filename, content))
             except zipfile.BadZipFile:
+                skip_corrupt_zip += 1
                 continue
+        elif len(raw) > MAX_FILE_SIZE:
+            skip_oversized += 1
         elif is_scannable_path(name):
             content = raw.decode("utf-8", errors="replace")
-            to_process.append((name, content))
+            detected.append((name, content))
+        else:
+            skip_unsupported += 1
 
-    to_process = to_process[:MAX_BATCH_FILES]
+    files_detected = len(detected)
+    to_process = detected[:MAX_BATCH_FILES]
+    skip_capped = files_detected - len(to_process)
+
     if not to_process:
         raise HTTPException(
             status_code=400,
@@ -160,17 +225,37 @@ async def scan_batch(
     for filename, content in to_process:
         is_valid, _ = ml_bridge.validate_code(content)
         if not is_valid:
+            skip_invalid_content += 1
             continue
         record = run_and_store_scan(
             db, content, project_name, filename, model_choice, "batch", batch_id=batch_id,
         )
         results.append(record_to_dict(record, include_code=False))
 
+    skip_reasons = []
+    if skip_capped > 0:
+        skip_reasons.append(f"{skip_capped} file(s) beyond the {MAX_BATCH_FILES}-file-per-scan cap")
+    if skip_oversized > 0:
+        skip_reasons.append(f"{skip_oversized} file(s) exceeded the {MAX_FILE_SIZE // 1000}KB size limit")
+    if skip_unsupported > 0:
+        skip_reasons.append(f"{skip_unsupported} file(s) unsupported extension or excluded directory")
+    if skip_unsafe_path > 0:
+        skip_reasons.append(f"{skip_unsafe_path} archive member(s) rejected for an unsafe path (../ or absolute)")
+    if skip_corrupt_zip > 0:
+        skip_reasons.append(f"{skip_corrupt_zip} corrupt/unreadable ZIP archive(s)")
+    if skip_zip_bomb > 0:
+        skip_reasons.append(f"{skip_zip_bomb} ZIP archive(s) rejected (too many entries or too large uncompressed)")
+    if skip_invalid_content > 0:
+        skip_reasons.append(f"{skip_invalid_content} file(s) failed content validation (empty/malformed)")
+
     vulnerable = sum(1 for r in results if r["verdict"] == "VULNERABLE")
     return {
         "batch_id": batch_id,
         "total_files_submitted": len(files),
+        "files_detected": files_detected,
         "total_files_scanned": len(results),
+        "files_skipped": files_detected - len(results),
+        "skip_reasons": skip_reasons,
         "vulnerable_count": vulnerable,
         "safe_count": len(results) - vulnerable,
         "results": results,

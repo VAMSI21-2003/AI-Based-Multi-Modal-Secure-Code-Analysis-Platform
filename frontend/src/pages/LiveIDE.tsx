@@ -446,6 +446,11 @@ function LivePanel({ tab, result, analyzing }: { tab: Tab; result: LiveScanResul
       {result.suggested_rewrite?.changed && (
         <div className="pt-2 border-t border-(--border-hairline)">
           <div className="text-xs font-semibold mb-1.5">Suggested Secure Rewrite</div>
+          {result.suggested_rewrite.requires_manual_sizing && (
+            <div className="text-[11px] text-(--status-warning) bg-(--status-warning)/10 rounded-lg p-2 mb-1.5">
+              Contains a <code className="mono">dest_size</code> placeholder — real buffer capacity could not be determined; fill it in manually.
+            </div>
+          )}
           <pre className="text-[11px] mono bg-(--surface-3) rounded-lg p-3 overflow-x-auto whitespace-pre-wrap">{result.suggested_rewrite.rewritten_code}</pre>
         </div>
       )}

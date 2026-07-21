@@ -63,6 +63,16 @@ def test_validate_code_accepts_real_function():
     assert is_valid is True
 
 
+def test_ast_extraction_survives_malformed_source_without_crashing():
+    # tree-sitter's error-tolerant parsing should produce a best-effort tree
+    # (with error nodes counted, not raised) rather than throwing -- this is
+    # the real behavior a truncated/corrupt uploaded file exercises.
+    malformed = "void broken(char *x { if (x strcpy(x"
+    feats = ml_bridge.extract_ast_features(malformed)
+    assert len(feats) == 11
+    assert feats["n_error_nodes"] >= 1
+
+
 def test_get_risk_level_thresholds():
     # get_risk_level is the single source of truth every dashboard/report
     # reads risk-level labels from -- a regression here would silently

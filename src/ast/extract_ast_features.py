@@ -446,6 +446,14 @@ print()
 
 feature_rows = []   # will collect one dict per sample
 failed_count = 0    # number of samples where parsing produced errors
+short_count = 0     # informational only -- rows under MIN_FUNC_LENGTH are still kept (Phase 4 fix)
+
+if "original_id" not in df.columns:
+    print("  ERROR: input file has no 'original_id' column.")
+    print("  Re-run src/preprocessing/preprocess_dataset.py (Day 4) first --")
+    print("  it must be regenerated to assign this stable ID (see")
+    print("  docs/ML_FORENSIC_AUDIT_PHASE4.md for why this is required).")
+    sys.exit(1)
 
 for row_index, row in df.iterrows():
 
@@ -459,19 +467,29 @@ for row_index, row in df.iterrows():
     # -- Get the C source code for this row -----------------------------------
     code_text = str(row["func"])
 
-    # Skip if still too short (safety check)
-    if len(code_text.strip()) < MIN_FUNC_LENGTH:
-        continue
-
-    # -- Extract features -----------------------------------------------------
+    # NOTE (Phase 4 fix): this script used to `continue` (silently drop the
+    # row) here if the function was under MIN_FUNC_LENGTH characters. That
+    # was a SEPARATE, stricter filter than extract_metrics.py's (10 chars),
+    # and since each script used to assign sample_id = its own output's row
+    # position, the two scripts' numbering silently diverged the moment
+    # either one dropped a row the other kept -- confirmed to affect 99.35%
+    # of the fused dataset (docs/ML_FORENSIC_AUDIT_PHASE4.md). Every row is
+    # now KEPT and carried through with its stable original_id; a genuinely
+    # too-short/unparseable function still gets real (usually all-zero,
+    # parse_failed=True) features via extract_ast_features()'s own
+    # exception handling below, rather than silently vanishing from the
+    # dataset and shifting every subsequent row's alignment.
     ast_feats = extract_ast_features(code_text)
 
     if ast_feats["parse_failed"]:
         failed_count += 1
+    if len(code_text.strip()) < MIN_FUNC_LENGTH:
+        short_count += 1  # informational only -- row is still kept, see note above
 
     # -- Build the output row --------------------------------------------------
     # Start with the original columns then add AST feature columns
     combined = {
+        "original_id": row["original_id"],
         "func"      : row["func"],
         "target"    : row["target"],
         "project"   : row.get("project",   "unknown"),
@@ -481,9 +499,11 @@ for row_index, row in df.iterrows():
     feature_rows.append(combined)
 
 # Print a blank line after the progress display
-print(f"\n  Done.  Processed {len(feature_rows)} samples.")
-print(f"  Samples with parse errors : {failed_count}")
-print(f"  Parse error rate          : {failed_count/len(feature_rows)*100:.2f}%")
+print(f"\n  Done.  Processed {len(feature_rows)} samples.  (Every input row is kept --")
+print(f"  no row is dropped by this script; see Phase 4 fix notes above.)")
+print(f"  Samples with parse errors      : {failed_count}")
+print(f"  Parse error rate               : {failed_count/len(feature_rows)*100:.2f}%")
+print(f"  Samples under {MIN_FUNC_LENGTH} chars (kept anyway) : {short_count}")
 
 
 # -- SECTION 9: SAVE FEATURES TO CSV ------------------------------------------

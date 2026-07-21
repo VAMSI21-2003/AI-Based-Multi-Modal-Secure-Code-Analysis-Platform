@@ -63,6 +63,29 @@ class ScanRecord(Base):
     created_at = Column(DateTime, default=dt.datetime.utcnow, index=True)
 
 
+class GitHubBatchMeta(Base):
+    """
+    Per-batch repository provenance for a GitHub Mode scan -- a new table
+    (not new columns on `scans`) so this is a purely additive change: no
+    ALTER TABLE on the existing, already-populated `scans` table, and a
+    fresh SQLite database with no rows here is exactly as valid as one with
+    many. One row per batch_id, written once when github_service.scan_repo()
+    finishes cloning+scanning.
+    """
+    __tablename__ = "github_batch_meta"
+
+    batch_id = Column(String, primary_key=True)
+    repo_url = Column(String)
+    repo_name = Column(String)
+    branch = Column(String, nullable=True)
+    commit_sha = Column(String, nullable=True)
+    files_detected = Column(Integer, default=0)
+    files_analyzed = Column(Integer, default=0)
+    files_skipped = Column(Integer, default=0)
+    skip_reasons = Column(Text, default="")  # human-readable, comma-joined
+    scanned_at = Column(DateTime, default=dt.datetime.utcnow)
+
+
 Base.metadata.create_all(bind=engine)
 
 

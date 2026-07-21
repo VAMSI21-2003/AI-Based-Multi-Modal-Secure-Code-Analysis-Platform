@@ -158,7 +158,12 @@ PROGRESS_EVERY = 10
 # all progress and start over from sample 0. Every CHECKPOINT_EVERY batches
 # we save what has been computed so far -- the next run picks up where
 # this one left off instead of repeating already-finished work.
-CHECKPOINT_EVERY = 100
+# Lowered from 100 to 20 for this Phase 4 regeneration run specifically:
+# the host environment has been observed to kill long-running background
+# processes with no warning, sometimes within minutes, so a tighter
+# checkpoint interval (~1-2 minutes of CPU work at this dataset's observed
+# throughput) bounds how much re-computation a kill costs.
+CHECKPOINT_EVERY = 20
 
 # The dimensionality of CodeBERT's output embedding.
 # Every function produces exactly 768 numbers regardless of how long it is.
@@ -582,7 +587,21 @@ else:
 print(f"  Total samples : {len(df)}")
 print(f"  Columns       : {list(df.columns)}")
 
+if "original_id" not in df.columns:
+    print()
+    print("  ERROR: input file has no 'original_id' column.")
+    print("  Re-run src/preprocessing/preprocess_dataset.py (Day 4) first --")
+    print("  it must be regenerated to assign this stable ID (see")
+    print("  docs/ML_FORENSIC_AUDIT_PHASE4.md for why this is required).")
+    sys.exit(1)
+
 # ── Apply MAX_SAMPLES limit ────────────────────────────────────────────────────
+# NOTE: .head(N) is a prefix truncation (keeps original row order, drops
+# nothing in the middle), so this was never the source of the Phase 4
+# misalignment bug -- but embedding_row below is now read directly from the
+# carried 'original_id' column rather than re-derived via range(len(df)),
+# so this script's ID handling no longer relies on that "no mid-sequence
+# drops happen here" assumption holding true in perpetuity.
 if MAX_SAMPLES is not None and MAX_SAMPLES < len(df):
     df = df.head(MAX_SAMPLES).reset_index(drop=True)
     print()
@@ -782,7 +801,29 @@ if "project" in df.columns:
 if "commit_id" in df.columns:
     meta_df["commit_id"] = df["commit_id"]
 
-meta_df["embedding_row"] = range(len(df))   # row index in the .npy array
+# Two DIFFERENT identifiers, kept as two separate columns -- do not conflate
+# them:
+#
+#   original_id   : the STABLE identity of the underlying dataset sample,
+#                   copied directly from the input (devign_cleaned.csv).
+#                   This is the ONLY column fuse_features.py may join on.
+#
+#   embedding_row : the PHYSICAL row position of that sample inside
+#                   embedding_matrix / OUTPUT_NPY (0, 1, 2, ... in the order
+#                   this script actually wrote rows to the .npy file). This
+#                   is what you need if you ever want to index directly into
+#                   codebert_embeddings.npy for a given sample -- it is NOT a
+#                   safe cross-modal join key, because a future version of
+#                   this script (or a MAX_SAMPLES / filtering change) could
+#                   make embedding_row diverge from original_id (e.g. if
+#                   original_id has gaps but embedding_row never does).
+#
+# Today, with MAX_SAMPLES=None and no row drops in this script, the two
+# happen to be numerically identical (both 0..len(df)-1) -- but the columns
+# must stay separate and separately named so that fact is never silently
+# assumed by downstream code.
+meta_df["original_id"] = df["original_id"].values
+meta_df["embedding_row"] = range(len(df))
 
 meta_df.to_csv(OUTPUT_META_CSV, index=False, encoding="utf-8")
 print(f"  Metadata CSV : {OUTPUT_META_CSV}")

@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useSearchParams, useNavigate, Link } from "react-router-dom";
 import toast from "react-hot-toast";
 import {
-  GitFork, GitCommit, Download, FolderGit2, ArrowUpRight, ShieldCheck, ShieldAlert, FileCode2, GitBranch,
+  GitFork, GitCommit, Download, FolderGit2, ArrowUpRight, ShieldCheck, ShieldAlert, FileCode2, GitBranch, AlertTriangle, Info,
 } from "lucide-react";
 import PageShell from "../components/PageShell";
 import ChartCard from "../components/ChartCard";
@@ -10,8 +10,8 @@ import StatCard from "../components/StatCard";
 import Gauge from "../components/Gauge";
 import { Spinner } from "../components/Loading";
 import {
-  scanGitHubRepo, getProjectSummary, getGitHubCommits, downloadBatchPdf,
-  type ProjectSummary, type GitHubCommit,
+  scanGitHubRepo, getProjectSummary, getGitHubCommits, getGitHubBatchMeta, downloadBatchPdf,
+  type ProjectSummary, type GitHubCommit, type GitHubBatchMeta,
 } from "../api/client";
 import { RISK_HEX, timeAgo } from "../utils/risk";
 
@@ -26,6 +26,7 @@ export default function GitHubMode() {
 
   const [summary, setSummary] = useState<ProjectSummary | null>(null);
   const [commits, setCommits] = useState<GitHubCommit[] | null>(null);
+  const [meta, setMeta] = useState<GitHubBatchMeta | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -34,6 +35,10 @@ export default function GitHubMode() {
     Promise.all([getProjectSummary(batchId), getGitHubCommits(batchId)])
       .then(([s, c]) => { setSummary(s); setCommits(c); })
       .catch((e) => setError(e?.response?.data?.detail || e.message || "Failed to load repository scan"));
+    // Meta (scan scope/completeness) is fetched separately and allowed to fail
+    // silently (404 for batches scanned before this field existed) -- it's an
+    // enhancement to the page, not a prerequisite for the page to load.
+    getGitHubBatchMeta(batchId).then(setMeta).catch(() => setMeta(null));
   }, [batchId]);
 
   const onScan = async () => {
@@ -116,6 +121,39 @@ export default function GitHubMode() {
         </>
       }
     >
+      {meta && (
+        <ChartCard title="Scan Scope" subtitle="Reported exactly as measured — a capped or partial scan is never presented as complete" className="mb-5">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+            <div>
+              <div className="text-[10px] uppercase tracking-wider text-(--text-muted)">Branch</div>
+              <div className="text-sm font-semibold mono truncate">{meta.branch ?? "unknown"}</div>
+            </div>
+            <div>
+              <div className="text-[10px] uppercase tracking-wider text-(--text-muted)">Commit</div>
+              <div className="text-sm font-semibold mono truncate" title={meta.commit_sha ?? undefined}>{meta.commit_sha ? meta.commit_sha.slice(0, 12) : "unavailable"}</div>
+            </div>
+            <div>
+              <div className="text-[10px] uppercase tracking-wider text-(--text-muted)">Files Detected</div>
+              <div className="text-sm font-semibold">{meta.files_detected}</div>
+            </div>
+            <div>
+              <div className="text-[10px] uppercase tracking-wider text-(--text-muted)">Files Analyzed</div>
+              <div className="text-sm font-semibold">{meta.files_analyzed}</div>
+            </div>
+          </div>
+          <div className="mt-4 px-4 py-2.5 rounded-lg bg-(--surface-2) border border-(--border-hairline) text-xs text-(--text-secondary)">
+            {meta.files_skipped === 0 ? (
+              <span><ShieldCheck size={13} className="inline mr-1.5 text-(--status-good)" />Every detected C/C++ source file was analyzed — full coverage within this platform's supported scope.</span>
+            ) : (
+              <span><AlertTriangle size={13} className="inline mr-1.5 text-(--status-warning)" />{meta.files_skipped} file(s) were not analyzed: {meta.skip_reasons.join("; ") || "reason not recorded"}.</span>
+            )}
+          </div>
+          <div className="mt-2 text-[11px] text-(--text-muted) flex items-center gap-1.5">
+            <Info size={11} /> Scope: C/C++ source files (.c/.h/.cpp/.cc/.cxx/.hpp), excluding docs/examples/sample/IDE directories.
+          </div>
+        </ChartCard>
+      )}
+
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-5">
         <StatCard label="Files Scanned" value={summary.total_files} icon={FileCode2} accent="var(--series-1)" />
         <StatCard label="Safe Files" value={summary.safe_files} icon={ShieldCheck} accent="var(--status-good)" />

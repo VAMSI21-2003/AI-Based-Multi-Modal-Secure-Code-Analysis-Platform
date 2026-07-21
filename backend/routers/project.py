@@ -12,9 +12,9 @@ from collections import Counter
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
+import analysis_cache
 import code_intelligence
 import knowledge_base
-import ml_bridge
 from database import get_db, ScanRecord
 from scan_service import record_to_dict
 from repo_analysis import folder_scores
@@ -51,9 +51,11 @@ def project_summary(batch_id: str, db: Session = Depends(get_db)):
     # Repository-wide rollups (Repository Scanner, Phase 3 + Phase 5.2):
     # function count, dangerous APIs, CWEs, maintainability, most dangerous
     # function, and per-severity finding counts across every scanned file --
-    # built from the same code_intelligence.analyze() / ml_bridge.line_risk_scan
-    # output already used by Call Graph / File Explorer / Knowledge Graph /
-    # Heatmap, so these are real aggregates, not estimates.
+    # built from the same code_intelligence.analyze() / line_risk_scan output
+    # already used by Call Graph / File Explorer / Knowledge Graph / Heatmap,
+    # so these are real aggregates, not estimates. Routed through
+    # analysis_cache (per-ScanRecord.id, safe since code/vuln_probability are
+    # immutable post-creation) instead of recomputing on every request.
     function_count = 0
     api_counter: Counter = Counter()
     cwe_counter: Counter = Counter()
@@ -62,7 +64,7 @@ def project_summary(batch_id: str, db: Session = Depends(get_db)):
     finding_severity_counts = {"critical": 0, "high": 0, "medium": 0, "low": 0}
 
     for r in records:
-        intel = code_intelligence.analyze(r.code, vuln_probability=r.vuln_probability or 0.0)
+        intel = analysis_cache.get_intel(r)
         if intel.get("available"):
             function_count += intel.get("function_count", 0)
             for d in intel.get("dangerous_apis", []):
@@ -83,7 +85,7 @@ def project_summary(batch_id: str, db: Session = Depends(get_db)):
                 ) > (most_dangerous_function["dangerous_api_count"], most_dangerous_function["complexity"]):
                     most_dangerous_function = candidate
 
-        for lr in ml_bridge.line_risk_scan(r.code):
+        for lr in analysis_cache.get_line_risks(r):
             key = _SEVERITY_KEY.get(lr["severity"])
             if key:
                 finding_severity_counts[key] += 1
@@ -213,7 +215,7 @@ def dependency_graph(batch_id: str, db: Session = Depends(get_db)):
     per_file_intel = {}   # filename -> code_intelligence.analyze() result
 
     for r in records:
-        intel = code_intelligence.analyze(r.code, vuln_probability=r.vuln_probability or 0.0)
+        intel = analysis_cache.get_intel(r)
         per_file_intel[r.filename] = intel
         if not intel.get("available"):
             continue
@@ -341,7 +343,7 @@ def knowledge_graph(batch_id: str, db: Session = Depends(get_db)):
 
     per_file_intel = {}
     for r in records:
-        intel = code_intelligence.analyze(r.code, vuln_probability=r.vuln_probability or 0.0)
+        intel = analysis_cache.get_intel(r)
         per_file_intel[r.filename] = intel
         if intel.get("available"):
             for f in intel["functions"]:

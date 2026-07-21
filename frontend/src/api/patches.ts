@@ -11,6 +11,7 @@ export interface PatchCard {
   explanation: string;
   why_safer: string;
   detected: boolean;
+  size_known: boolean;
 }
 
 export interface PatchResponse {

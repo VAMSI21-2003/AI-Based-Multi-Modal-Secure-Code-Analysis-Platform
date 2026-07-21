@@ -75,8 +75,13 @@
 #   STEP 3  : Load AST features from devign_ast_features.csv
 #   STEP 4  : Load Software Metrics from metrics_features.csv
 #   STEP 5  : Load CodeBERT embeddings from codebert_embeddings.csv
-#   STEP 6  : Align tables using sample_id (row number from original dataset)
-#   STEP 7  : Merge all three tables (two pd.merge() calls)
+#   STEP 6  : Select the columns needed from each table (join key: original_id,
+#             a STABLE per-sample identifier assigned once in preprocessing --
+#             NOT a row number recomputed by any of these scripts; see the
+#             Phase 4 fix note in Section 3.5 below for why row-position IDs
+#             are unsafe)
+#   STEP 7  : Merge all three tables via fuse_tables() (original_id join +
+#             explicit alignment validation)
 #   STEP 8  : Validate: row count, missing values, duplicates, label integrity
 #   STEP 9  : Save to dataset/processed/final_features.csv
 #   STEP 10 : Print feature statistics by label
@@ -197,6 +202,26 @@ def section(title):
     print("=" * 65)
 
 
+# ── SECTION 3.5: STABLE-ID FUSION + EXPLICIT VALIDATION (Phase 4 fix) ────────
+#
+# See docs/ML_FORENSIC_AUDIT_PHASE4.md for the full forensic finding this
+# replaces: the previous version of this script assigned sample_id as
+# range(len(each_table)) -- i.e. each table's OWN output row position, not a
+# stable reference to the original dataset. Since extract_ast_features.py
+# and extract_metrics.py used different, inconsistent minimum-length
+# filters, their row-position numbering silently desynced, and 99.35% of
+# fused rows paired one function's label/AST features with a DIFFERENT
+# function's metrics/CodeBERT features.
+#
+# fuse_tables()/FusionAlignmentError now live in fusion_core.py (a plain
+# module with zero side effects on import) specifically so they can be unit
+# tested directly without triggering this script's file-existence checks
+# and sys.exit() calls -- see tests/test_fusion_alignment.py.
+
+sys.path.insert(0, SCRIPT_DIR)
+from fusion_core import fuse_tables, FusionAlignmentError  # noqa: E402
+
+
 # =============================================================================
 # STEP 1 -- DEMO: TINY EXAMPLE SHOWING FEATURE FUSION
 # =============================================================================
@@ -216,11 +241,21 @@ section("STEP 1: DEMO -- TINY EXAMPLE OF FEATURE FUSION")
 print()
 print("  Imagine we have 4 C functions.")
 print("  Each of the three scripts (Days 5, 6, 7) produced its OWN table.")
-print("  Now we JOIN all three tables into one using SAMPLE ID.")
+print("  Now we JOIN all three tables into one using a STABLE SAMPLE ID.")
 print()
-print("  SAMPLE ID = the row number of the function in devign_cleaned.csv.")
+print("  This demo labels the join key 'sample_id' for readability, but the")
+print("  real pipeline's join key is called 'original_id': a value assigned")
+print("  ONCE in preprocess_dataset.py and carried forward unchanged by every")
+print("  later script -- it is deliberately NOT each table's own row number,")
+print("  because a table's row number silently changes if that script (or an")
+print("  earlier one) ever drops a different set of rows than another table's")
+print("  script did. That exact mistake -- using recomputed row position as")
+print("  the join key -- caused a real bug where 99.35% of the fused dataset")
+print("  paired one function's label/AST features with a different")
+print("  function's metrics/CodeBERT features (docs/ML_FORENSIC_AUDIT_PHASE4.md).")
 print("  Sample ID 0 in the AST table is the SAME function as")
-print("  Sample ID 0 in the Metrics table and Sample ID 0 in CodeBERT.")
+print("  Sample ID 0 in the Metrics table and Sample ID 0 in CodeBERT --")
+print("  guaranteed by being the SAME stable ID, never by row position.")
 print()
 
 # ── Build tiny demo tables ───────────────────────────────────────────────────
@@ -381,24 +416,22 @@ print(f"  Rows        : {len(ast_df)}")
 print(f"  Columns     : {len(ast_df.columns)}")
 print()
 
-# ── Add sample_id ─────────────────────────────────────────────────────────────
+# ── original_id (Phase 4 fix) ─────────────────────────────────────────────────
 #
-# The AST CSV does not have a 'sample_id' column.
-# We CREATE one here by assigning the row's position: 0, 1, 2, 3, ...
-#
-# WHY?
-#   All three feature files come from devign_cleaned.csv, processed
-#   in the SAME ORDER. Row 0 in the AST file is the SAME function as
-#   Row 0 in the metrics file and Row 0 in the CodeBERT file.
-#   By assigning sample_id = row number, we get a key that works
-#   for all three tables.
-#
-# range(len(ast_df)) generates: 0, 1, 2, 3, ..., (n-1)
-# This is assigned as a new column named "sample_id".
+# This column is now assigned ONCE, in preprocess_dataset.py, and carried
+# forward unchanged by every extraction script -- it is NOT recomputed here
+# as a local row position. See docs/ML_FORENSIC_AUDIT_PHASE4.md for why the
+# previous "range(len(ast_df))" approach silently corrupted 99.35% of the
+# fused dataset the moment this file's row count diverged from another
+# table's (which it did: AST used to drop rows under 50 chars while metrics
+# used a different, laxer 10-char threshold).
 
-ast_df["sample_id"] = range(len(ast_df))
+if "original_id" not in ast_df.columns:
+    print("  ERROR: 'original_id' column missing from the AST features file.")
+    print("  Re-run: preprocess_dataset.py (Day 4) THEN extract_ast_features.py (Day 5).")
+    sys.exit(1)
 
-print(f"  Added 'sample_id' column: 0 to {len(ast_df) - 1}")
+print(f"  'original_id' present -- range {ast_df['original_id'].min()} to {ast_df['original_id'].max()}.")
 
 # ── Verify all expected feature columns are present ──────────────────────────
 missing_ast_cols = [col for col in AST_FEATURE_COLS if col not in ast_df.columns]
@@ -409,9 +442,9 @@ if missing_ast_cols:
 
 print(f"  Verified: all {N_AST} AST feature columns present.")
 print()
-print("  First 3 rows (sample_id + target + 3 key AST features):")
+print("  First 3 rows (original_id + target + 3 key AST features):")
 
-display_cols = ["sample_id", "target", "n_loops", "n_pointer_ops", "max_depth"]
+display_cols = ["original_id", "target", "n_loops", "n_pointer_ops", "max_depth"]
 print(ast_df[display_cols].head(3).to_string(index=False))
 
 
@@ -426,11 +459,12 @@ print(f"  Rows        : {len(metrics_df)}")
 print(f"  Columns     : {len(metrics_df.columns)}")
 print()
 
-# Same logic: add sample_id = row position
-# This matches the AST file's sample_id for the same function.
-metrics_df["sample_id"] = range(len(metrics_df))
+if "original_id" not in metrics_df.columns:
+    print("  ERROR: 'original_id' column missing from the metrics features file.")
+    print("  Re-run: preprocess_dataset.py (Day 4) THEN extract_metrics.py (Day 6).")
+    sys.exit(1)
 
-print(f"  Added 'sample_id' column: 0 to {len(metrics_df) - 1}")
+print(f"  'original_id' present -- range {metrics_df['original_id'].min()} to {metrics_df['original_id'].max()}.")
 
 missing_metric_cols = [col for col in METRICS_FEATURE_COLS if col not in metrics_df.columns]
 if missing_metric_cols:
@@ -440,9 +474,9 @@ if missing_metric_cols:
 
 print(f"  Verified: all {N_METRICS} metric feature columns present.")
 print()
-print("  First 3 rows (sample_id + 3 key metric features):")
+print("  First 3 rows (original_id + 3 key metric features):")
 
-display_cols = ["sample_id", "loc", "pointer_count", "comment_count"]
+display_cols = ["original_id", "loc", "pointer_count", "comment_count"]
 print(metrics_df[display_cols].head(3).to_string(index=False))
 
 
@@ -461,33 +495,45 @@ print(f"  Rows    : {len(codebert_df)}")
 print(f"  Columns : {len(codebert_df.columns)}")
 print()
 
-# ── Handle sample_id for CodeBERT ────────────────────────────────────────────
+# ── original_id / embedding_row for CodeBERT ─────────────────────────────────
 #
-# The Day 7 script stored an 'embedding_row' column in the CSV.
-# 'embedding_row' contains the row number of each sample in the original
-# devign_cleaned.csv. For example, if MAX_SAMPLES was 200:
+# extract_embeddings.py writes TWO distinct columns, which this script must
+# NOT conflate:
 #
-#   embedding_row 0  = the 1st function from devign_cleaned.csv
-#   embedding_row 1  = the 2nd function from devign_cleaned.csv
-#   ...
-#   embedding_row 199 = the 200th function
+#   original_id   : the stable identity of the underlying dataset sample,
+#                   copied directly from devign_cleaned.csv. This is the
+#                   ONLY column used below to join against AST/Metrics.
 #
-# We RENAME this column to 'sample_id' so it matches the other two tables.
-# After renaming, an inner join on 'sample_id' correctly aligns:
-#   - ast_df row 0          (sample_id = 0)
-#   - metrics_df row 0      (sample_id = 0)
-#   - codebert_df row where embedding_row = 0  (sample_id = 0)
-# All three point to the SAME C function.
+#   embedding_row : the PHYSICAL row position of that sample inside
+#                   codebert_embeddings.npy -- useful for directly indexing
+#                   that file, but NEVER a substitute for original_id in a
+#                   cross-modal join, and never renamed to original_id or
+#                   sample_id. (Today the two happen to be numerically
+#                   identical because extract_embeddings.py currently never
+#                   drops rows -- but this script must not rely on that.)
+#
+# There is deliberately NO range()-based fallback if original_id is missing:
+# that would silently reintroduce the exact row-position bug this fix
+# removes (docs/ML_FORENSIC_AUDIT_PHASE4.md).
 
-if "embedding_row" in codebert_df.columns:
-    codebert_df = codebert_df.rename(columns={"embedding_row": "sample_id"})
-    print("  'embedding_row' column renamed to 'sample_id'.")
-    print(f"  sample_id range: {codebert_df['sample_id'].min()} "
-          f"to {codebert_df['sample_id'].max()}")
-else:
-    # Fallback: if embedding_row is missing, use row position
-    codebert_df["sample_id"] = range(len(codebert_df))
-    print("  'embedding_row' not found. Used row position as sample_id.")
+if "original_id" not in codebert_df.columns:
+    print("  ERROR: 'original_id' column missing from the CodeBERT file.")
+    print("  Re-run extract_embeddings.py -- it must copy 'original_id'")
+    print("  directly from devign_cleaned.csv, not derive it from")
+    print("  embedding_row or range(len(df)).")
+    sys.exit(1)
+
+if "embedding_row" not in codebert_df.columns:
+    print("  ERROR: 'embedding_row' column missing from the CodeBERT file.")
+    print("  Re-run extract_embeddings.py -- it must write embedding_row as")
+    print("  each sample's physical position in codebert_embeddings.npy.")
+    sys.exit(1)
+
+print(f"  'original_id' present -- range "
+      f"{codebert_df['original_id'].min()} to {codebert_df['original_id'].max()}.")
+print(f"  'embedding_row' present -- range "
+      f"{codebert_df['embedding_row'].min()} to {codebert_df['embedding_row'].max()}"
+      f"  (physical position in the .npy file; NOT used for joining).")
 
 # ── Verify embedding columns ─────────────────────────────────────────────────
 missing_embed_cols = [col for col in EMBED_COLS if col not in codebert_df.columns]
@@ -501,37 +547,41 @@ print(f"  Verified: all {N_EMBED} embedding columns present (embed_000 to embed_
 print()
 print(f"  NOTE: CodeBERT may have fewer rows than AST/Metrics if")
 print(f"  MAX_SAMPLES was set to a small number in extract_embeddings.py.")
-print(f"  The inner join (Step 7) will keep only rows present in ALL THREE files.")
+print(f"  The inner join (Step 7) will keep only rows present in ALL THREE files,")
+print(f"  matched by the stable original_id -- never by row position.")
 
 
 # ── STEP 6: SELECT FEATURE COLUMNS ───────────────────────────────────────────
 
 section("STEP 6: SELECTING COLUMNS FROM EACH TABLE")
 
-print("  We keep only the columns we need from each file.")
-print("  This avoids duplicate 'target', 'project', 'commit_id' columns")
-print("  that would appear if we merged ALL columns from all three files.")
+print("  We keep only the columns we need from each file, PLUS 'target' (and")
+print("  'func' where available) on more than one table deliberately -- these")
+print("  duplicates are used by fuse_tables() to CROSS-VALIDATE that the join")
+print("  actually paired up the same original function, then dropped.")
 print()
 
-# FROM AST: sample_id + metadata + 11 AST feature columns
-ast_meta = [c for c in ["target", "project", "commit_id"] if c in ast_df.columns]
-ast_sel   = ast_df[["sample_id"] + ast_meta + AST_FEATURE_COLS].copy()
+# FROM AST: original_id + metadata (target/project/commit_id/func) + 11 AST features
+ast_meta = [c for c in ["target", "project", "commit_id", "func"] if c in ast_df.columns]
+ast_sel   = ast_df[["original_id"] + ast_meta + AST_FEATURE_COLS].copy()
 
-# FROM METRICS: sample_id + 13 metric columns ONLY  (no metadata — already in ast_sel)
-metrics_sel = metrics_df[["sample_id"] + METRICS_FEATURE_COLS].copy()
+# FROM METRICS: original_id + target + func (for cross-validation) + 13 metric columns
+metrics_meta = [c for c in ["target", "func"] if c in metrics_df.columns]
+metrics_sel = metrics_df[["original_id"] + metrics_meta + METRICS_FEATURE_COLS].copy()
 
-# FROM CODEBERT: sample_id + 768 embedding columns ONLY
-codebert_sel = codebert_df[["sample_id"] + EMBED_COLS].copy()
+# FROM CODEBERT: original_id + target (for cross-validation) + 768 embedding columns
+codebert_meta = [c for c in ["target"] if c in codebert_df.columns]
+codebert_sel = codebert_df[["original_id"] + codebert_meta + EMBED_COLS].copy()
 
 print(f"  AST selected cols     : 1 (id) + {len(ast_meta)} (meta) + {N_AST} (features)"
       f" = {1 + len(ast_meta) + N_AST}")
-print(f"  Metrics selected cols : 1 (id) + {N_METRICS} (features)"
-      f" = {1 + N_METRICS}")
-print(f"  CodeBERT selected cols: 1 (id) + {N_EMBED} (features)"
-      f" = {1 + N_EMBED}")
+print(f"  Metrics selected cols : 1 (id) + {len(metrics_meta)} (meta) + {N_METRICS} (features)"
+      f" = {1 + len(metrics_meta) + N_METRICS}")
+print(f"  CodeBERT selected cols: 1 (id) + {len(codebert_meta)} (meta) + {N_EMBED} (features)"
+      f" = {1 + len(codebert_meta) + N_EMBED}")
 
 
-# ── STEP 7: MERGE ALL THREE TABLES ───────────────────────────────────────────
+# ── STEP 7: MERGE ALL THREE TABLES (stable-ID join + explicit validation) ───
 
 section("STEP 7: MERGING ALL THREE FEATURE TABLES")
 
@@ -539,41 +589,53 @@ print(f"  Sizes before merge:")
 print(f"    AST features        : {len(ast_sel)} rows")
 print(f"    Software metrics    : {len(metrics_sel)} rows")
 print(f"    CodeBERT embeddings : {len(codebert_sel)} rows")
-
-# ── Merge 1: AST + Metrics ────────────────────────────────────────────────────
 print()
-print("  MERGE 1: AST features + Software Metrics (on 'sample_id', inner join)")
+print("  Joining on 'original_id' via fuse_tables(), which raises")
+print("  FusionAlignmentError (stopping this script) if: any table is")
+print("  missing the original_id column, any table has duplicate")
+print("  original_id values, the three tables' original_id sets are")
+print("  COMPLETELY disjoint (zero overlap), or a cross-table label/code")
+print("  mismatch is found for a shared original_id. Partial ID overlap")
+print("  (e.g. CodeBERT having fewer rows) is NOT an error by itself -- the")
+print("  inner join keeps only the common IDs and the exact counts are")
+print("  printed below, never silently hidden. See Step 3.5 in this file's")
+print("  source, and fusion_core.fuse_tables()'s docstring, for the full")
+print("  validation logic.")
 
-merged_step1 = pd.merge(
-    ast_sel,            # left table  (has metadata + 11 AST features)
-    metrics_sel,        # right table (has 13 metric features)
-    on="sample_id",     # rows are matched by this column's value
-    how="inner",        # inner join: only rows present in BOTH tables survive
-                        # If a row exists in one file but not the other, DROP it.
-)
+try:
+    merged_all = fuse_tables(ast_sel, metrics_sel, codebert_sel)
+except FusionAlignmentError as e:
+    print()
+    print(f"  FUSION ALIGNMENT ERROR -- stopping. {e}")
+    sys.exit(1)
 
-print(f"  Rows after Merge 1   : {len(merged_step1)}")
-print(f"  Columns after Merge 1: {len(merged_step1.columns)}")
-
-# ── Merge 2: (AST + Metrics) + CodeBERT ──────────────────────────────────────
-#
-# The second merge adds 768 CodeBERT columns.
-# If CodeBERT only has 200 samples (MAX_SAMPLES=200), the inner join
-# will REDUCE the final table to those 200 samples.
-# This is expected: we can only train on samples where we have ALL features.
-
+report = merged_all.attrs.get("fusion_report", {})
 print()
-print("  MERGE 2: (AST + Metrics) + CodeBERT Embeddings (inner join)")
+print(f"  ── Fusion report (see fusion_core.fuse_tables() docstring) ──────────")
+print(f"  Input rows           -- AST: {report.get('ast_input_rows')}   "
+      f"Metrics: {report.get('metrics_input_rows')}   "
+      f"CodeBERT: {report.get('codebert_input_rows')}")
+print(f"  Unique original_id   -- AST: {report.get('unique_ids_ast')}   "
+      f"Metrics: {report.get('unique_ids_metrics')}   "
+      f"CodeBERT: {report.get('unique_ids_codebert')}")
+print(f"  original_id common to ALL THREE tables                          : {report.get('ids_common_all_three')}")
+print(f"  original_id missing from AST      (present in at least one other): {report.get('ids_missing_from_ast')}")
+print(f"  original_id missing from Metrics  (present in at least one other): {report.get('ids_missing_from_metrics')}")
+print(f"  original_id missing from CodeBERT (present in at least one other): {report.get('ids_missing_from_codebert')}")
+print(f"  original_id missing from at least one of the three tables       : {report.get('missing_from_at_least_one_table')}")
+print(f"  Final fused rows                                                 : {report.get('fused_rows')}")
+print(f"  Percent of the common intersection actually retained            : {report.get('pct_retained_from_intersection')}%")
+print(f"  Columns after merge                                              : {len(merged_all.columns)}")
+print()
+print(f"  PASS: target label cross-validated identical across AST/Metrics/CodeBERT for every fused row.")
+print(f"  PASS: source code text cross-validated identical between AST/Metrics for every fused row.")
+print(f"  PASS: no duplicate original_id values in the final fused table.")
 
-merged_all = pd.merge(
-    merged_step1,       # left: result of Merge 1
-    codebert_sel,       # right: 768 embedding columns
-    on="sample_id",
-    how="inner",
-)
-
-print(f"  Rows after Merge 2   : {len(merged_all)}")
-print(f"  Columns after Merge 2: {len(merged_all.columns)}")
+# Restore the 'sample_id' column name for backward compatibility with
+# train_classifier.py's METADATA_COLS and any other existing consumer of
+# final_features.csv's schema -- the VALUE is now the real, stable
+# original_id, only the column NAME is kept the same as before.
+merged_all = merged_all.rename(columns={"original_id": "sample_id"})
 
 print()
 print(f"  FINAL FEATURE MATRIX:")

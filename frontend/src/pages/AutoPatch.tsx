@@ -81,6 +81,12 @@ function PatchCardView({ patch }: { patch: PatchCard }) {
         </span>
       }
     >
+      {patch.detected && !patch.size_known && (
+        <div className="text-[11px] text-(--status-warning) bg-(--status-warning)/10 rounded-lg p-2 mb-3">
+          This destination's real buffer capacity could not be determined from the scanned code (likely a pointer parameter,
+          not a stack array) — the fix below uses a placeholder, not a fabricated size. Fill in the real capacity before using it.
+        </div>
+      )}
       <DiffViewer original={patch.original_code} modified={patch.fixed_code} />
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-4">
         <div className="text-xs p-3 rounded-lg bg-(--status-serious)/10 text-(--text-secondary)">

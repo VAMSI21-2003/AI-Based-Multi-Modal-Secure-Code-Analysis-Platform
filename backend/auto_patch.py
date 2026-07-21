@@ -12,66 +12,134 @@
 #     pointer misuse) -- a canonical vulnerable/secure example instead, so
 #     the requested category is still fully documented on the page.
 #
-# Purely additive: new file, does not modify recommendations.py or the
-# existing suggest_secure_rewrite() used by the Recommendations page.
+# Every DETECTED card also carries `size_known`: whether the proposed fix's
+# bound (sizeof(dest), or a literal scanf width) is backed by a real,
+# statically-visible declaration in the scanned code, or is a template the
+# developer must fill in with the real capacity. See patch_safety.py for why
+# this distinction exists and matters -- a "safer" patch built on a
+# fabricated size is not actually safe.
+#
+# Purely additive: does not modify recommendations.py or the existing
+# suggest_secure_rewrite() used by the Recommendations page (which applies
+# the same patch_safety.py logic separately, on its own whole-code rewrite).
 # =============================================================================
 
 import re
+
+import patch_safety
 
 MALLOC_FAMILY = re.compile(r"\b(\w+)\s*=\s*(?:\([^)]*\*\s*\)\s*)?(malloc|calloc|realloc)\s*\(")
 NULLCHECK_NEARBY = re.compile(r"==\s*NULL|!=\s*NULL|if\s*\(\s*!\s*\w+\s*\)")
 FREE_CALL = re.compile(r"\bfree\s*\(\s*(\w+)\s*\)")
 MALLOC_MULTIPLY = re.compile(r"(\w+)\s*=\s*(?:\([^)]*\*\s*\)\s*)?malloc\s*\(\s*([\w]+)\s*\*\s*([\w]+)")
-SCANF_S = re.compile(r"\bscanf\s*\(\s*\"[^\"]*%s")
+
+# Matches the common, safely-parseable case: one %s conversion, one plain
+# identifier argument. Anything more complex (multiple conversions, a
+# non-identifier argument) intentionally falls through to a generic,
+# honestly-labeled card rather than guessing.
+SCANF_ONE_ARG = re.compile(r'\bscanf\s*\(\s*"([^"]*)"\s*,\s*([A-Za-z_]\w*)\s*\)')
+SCANF_ANY = re.compile(r'\bscanf\s*\(\s*"[^"]*%s')
 
 STRCPY = re.compile(r"\bstrcpy\s*\(\s*([^,]+?)\s*,\s*([^)]+?)\s*\)")
 GETS = re.compile(r"\bgets\s*\(\s*([^)]+?)\s*\)")
 SPRINTF = re.compile(r"\bsprintf\s*\(\s*([^,]+?)\s*,")
 
 
-def _card(id_, category, cwe, title, line, original, fixed, explanation, why_safer, detected):
+def _card(id_, category, cwe, title, line, original, fixed, explanation, why_safer, detected, size_known=True):
     return {
         "id": id_, "category": category, "cwe": cwe, "title": title, "line": line,
         "original_code": original, "fixed_code": fixed,
         "explanation": explanation, "why_safer": why_safer, "detected": detected,
+        "size_known": size_known,
     }
 
 
-def _scan_line_patterns(lines):
+def _scan_line_patterns(code: str, lines):
     cards = []
     n = 0
     for i, line in enumerate(lines):
         m = STRCPY.search(line)
         if m:
             n += 1
-            fixed = STRCPY.sub(lambda mm: f"strncpy({mm.group(1)}, {mm.group(2)}, sizeof({mm.group(1)}) - 1); {mm.group(1)}[sizeof({mm.group(1)}) - 1] = '\\0'", line)
-            cards.append(_card(f"strcpy-{n}", "strcpy", "CWE-120", "Unbounded strcpy()", i + 1, line.strip(), fixed.strip(),
-                                "strcpy() copies until it hits a NUL byte with no regard for the destination buffer's size.",
-                                "strncpy() caps the copy at the destination size, and the explicit NUL write guarantees termination even if the source was truncated.",
-                                True))
+            dest, src = m.group(1), m.group(2)
+            if patch_safety.destination_capacity_is_known(code, dest):
+                fixed = STRCPY.sub(lambda mm: f"strncpy({mm.group(1)}, {mm.group(2)}, sizeof({mm.group(1)}) - 1); {mm.group(1)}[sizeof({mm.group(1)}) - 1] = '\\0'", line)
+                cards.append(_card(f"strcpy-{n}", "strcpy", "CWE-120", "Unbounded strcpy()", i + 1, line.strip(), fixed.strip(),
+                                    "strcpy() copies until it hits a NUL byte with no regard for the destination buffer's size.",
+                                    "strncpy() caps the copy at the destination size, and the explicit NUL write guarantees termination even if the source was truncated.",
+                                    True, size_known=True))
+            else:
+                fixed = f"strncpy({dest}, {src}, dest_size - 1); {dest}[dest_size - 1] = '\\0';  /* TODO: set dest_size to {dest}'s real capacity */"
+                cards.append(_card(f"strcpy-{n}", "strcpy", "CWE-120", "Unbounded strcpy()", i + 1, line.strip(), fixed,
+                                    "strcpy() copies until it hits a NUL byte with no regard for the destination buffer's size.",
+                                    patch_safety.UNKNOWN_CAPACITY_NOTE,
+                                    True, size_known=False))
         m = GETS.search(line)
         if m:
             n += 1
-            fixed = GETS.sub(lambda mm: f"fgets({mm.group(1)}, sizeof({mm.group(1)}), stdin)", line)
-            cards.append(_card(f"gets-{n}", "gets", "CWE-242", "Unsafe gets()", i + 1, line.strip(), fixed.strip(),
-                                "gets() cannot be told how large the destination buffer is -- any input longer than the buffer overflows it.",
-                                "fgets() takes an explicit size argument, so it can never write past the end of the buffer.",
-                                True))
+            dest = m.group(1)
+            if patch_safety.destination_capacity_is_known(code, dest):
+                fixed = GETS.sub(lambda mm: f"fgets({mm.group(1)}, sizeof({mm.group(1)}), stdin)", line)
+                cards.append(_card(f"gets-{n}", "gets", "CWE-242", "Unsafe gets()", i + 1, line.strip(), fixed.strip(),
+                                    "gets() cannot be told how large the destination buffer is -- any input longer than the buffer overflows it.",
+                                    "fgets() takes an explicit size argument, so it can never write past the end of the buffer.",
+                                    True, size_known=True))
+            else:
+                fixed = f"fgets({dest}, dest_size, stdin);  /* TODO: set dest_size to {dest}'s real capacity */"
+                cards.append(_card(f"gets-{n}", "gets", "CWE-242", "Unsafe gets()", i + 1, line.strip(), fixed,
+                                    "gets() cannot be told how large the destination buffer is -- any input longer than the buffer overflows it.",
+                                    patch_safety.UNKNOWN_CAPACITY_NOTE,
+                                    True, size_known=False))
         m = SPRINTF.search(line)
         if m:
             n += 1
-            fixed = SPRINTF.sub(lambda mm: f"snprintf({mm.group(1)}, sizeof({mm.group(1)}),", line)
-            cards.append(_card(f"sprintf-{n}", "sprintf", "CWE-120", "Unbounded sprintf()", i + 1, line.strip(), fixed.strip(),
-                                "sprintf() has no length limit -- a long enough formatted result overflows the destination buffer.",
-                                "snprintf() truncates safely at the given size instead of writing past the buffer.",
-                                True))
-        if SCANF_S.search(line):
+            dest = m.group(1)
+            if patch_safety.destination_capacity_is_known(code, dest):
+                fixed = SPRINTF.sub(lambda mm: f"snprintf({mm.group(1)}, sizeof({mm.group(1)}),", line)
+                cards.append(_card(f"sprintf-{n}", "sprintf", "CWE-120", "Unbounded sprintf()", i + 1, line.strip(), fixed.strip(),
+                                    "sprintf() has no length limit -- a long enough formatted result overflows the destination buffer.",
+                                    "snprintf() truncates safely at the given size instead of writing past the buffer.",
+                                    True, size_known=True))
+            else:
+                fixed = SPRINTF.sub(lambda mm: f"snprintf({mm.group(1)}, dest_size,  /* TODO: set dest_size to {mm.group(1)}'s real capacity */", line)
+                cards.append(_card(f"sprintf-{n}", "sprintf", "CWE-120", "Unbounded sprintf()", i + 1, line.strip(), fixed.strip(),
+                                    "sprintf() has no length limit -- a long enough formatted result overflows the destination buffer.",
+                                    patch_safety.UNKNOWN_CAPACITY_NOTE,
+                                    True, size_known=False))
+
+        scanf_one = SCANF_ONE_ARG.search(line)
+        if scanf_one:
+            fmt, dest = scanf_one.group(1), scanf_one.group(2)
+            if "%s" in fmt:
+                n += 1
+                capacity = patch_safety.get_declared_array_size(code, dest)
+                if capacity is not None and fmt.count("%s") == 1:
+                    width = capacity - 1
+                    fixed_fmt = fmt.replace("%s", f"%{width}s", 1)
+                    fixed = f'scanf("{fixed_fmt}", {dest});  // width limit = {dest}\'s real declared size ({capacity}) - 1'
+                    cards.append(_card(f"scanf-{n}", "scanf", "CWE-120", 'Unbounded scanf("%s")', i + 1, line.strip(), fixed,
+                                        "%s in scanf() has no width limit by default, so it can write past the end of the destination buffer.",
+                                        f"A numeric width (%{width}s) bounds how many characters scanf() will write into '{dest}', matching its real declared size.",
+                                        True, size_known=True))
+                else:
+                    reason = ("multiple conversions in one format string" if fmt.count("%s") != 1
+                               else f"'{dest}'s declared capacity could not be determined from this code")
+                    fixed = f'scanf("{fmt}", {dest});  /* TODO: add an explicit width to %s once you know {dest}\'s real capacity -- {reason} */'
+                    cards.append(_card(f"scanf-{n}", "scanf", "CWE-120", 'Unbounded scanf("%s")', i + 1, line.strip(), fixed,
+                                        "%s in scanf() has no width limit by default, so it can write past the end of the destination buffer.",
+                                        f"Could not derive a safe width automatically ({reason}); this shows the real matched call with the manual step still required -- not a fabricated size.",
+                                        True, size_known=False))
+        elif SCANF_ANY.search(line):
+            # A scanf("...%s...") call exists but its destination argument
+            # wasn't a single plain identifier (e.g. a struct member, a
+            # computed expression, or multiple arguments) -- do not invent a
+            # destination name or a size. Flag it honestly instead.
             n += 1
-            cards.append(_card(f"scanf-{n}", "scanf", "CWE-120", "Unbounded scanf(\"%s\")", i + 1, line.strip(),
-                                'char buf[64];\nscanf("%63s", buf);  // width limit = buffer size - 1',
+            cards.append(_card(f"scanf-{n}", "scanf", "CWE-120", 'Unbounded scanf("%s")', i + 1, line.strip(),
+                                "/* No automatic fix available: this call's destination could not be parsed from the surrounding code. Manually add an explicit width to %s bounded by the real destination capacity. */",
                                 "%s in scanf() has no width limit by default, so it can write past the end of the destination buffer.",
-                                "A numeric width (e.g. %63s for a 64-byte buffer) bounds how many characters scanf() will write.",
-                                True))
+                                "This destination expression is too complex for this deterministic engine to safely rewrite automatically.",
+                                True, size_known=False))
 
         mf = FREE_CALL.search(line)
         if mf:
@@ -83,7 +151,7 @@ def _scan_line_patterns(lines):
                                     f"{line.strip()}\n{var} = NULL;",
                                     f"'{var}' is freed but not reset -- any later use (or a second free()) is a use-after-free / double-free.",
                                     "Resetting the pointer to NULL makes a later dereference crash immediately and predictably instead of corrupting memory silently, and a second free(NULL) is a safe no-op.",
-                                    True))
+                                    True, size_known=True))
 
         mm = MALLOC_MULTIPLY.search(line)
         if mm:
@@ -94,7 +162,7 @@ def _scan_line_patterns(lines):
                                 guard + line.strip(),
                                 f"'{a} * {b}' can wrap around to a small (or zero) value on overflow, causing malloc() to under-allocate.",
                                 "Checking the multiplicands against SIZE_MAX before multiplying detects the overflow before it happens, instead of after the undersized buffer is already in use.",
-                                True))
+                                True, size_known=True))
 
         mmal = MALLOC_FAMILY.search(line)
         if mmal:
@@ -106,7 +174,7 @@ def _scan_line_patterns(lines):
                                     f"{line.strip()}\nif ({var} == NULL) {{\n    /* handle allocation failure */\n    return NULL;\n}}",
                                     f"'{var}' is used without first confirming the allocation succeeded -- if it returned NULL, the next use is a NULL dereference.",
                                     "An explicit check turns a random crash deep in the function into a clean, predictable early return at the point of failure.",
-                                    True))
+                                    True, size_known=True))
     return cards
 
 
@@ -140,7 +208,7 @@ REFERENCE_CARDS = [
 
 def generate_patches(code: str) -> dict:
     lines = code.split("\n")
-    detected = _scan_line_patterns(lines)
+    detected = _scan_line_patterns(code, lines)
     detected_categories = {c["category"] for c in detected}
     reference = [c for c in REFERENCE_CARDS if c["category"] not in detected_categories]
     return {

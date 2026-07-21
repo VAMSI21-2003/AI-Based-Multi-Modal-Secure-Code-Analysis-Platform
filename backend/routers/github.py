@@ -34,3 +34,11 @@ def scan(req: GitHubScanRequest):
 @router.get("/{batch_id}/commits")
 def commits(batch_id: str):
     return {"batch_id": batch_id, "commits": github_service.get_commit_history(batch_id)}
+
+
+@router.get("/{batch_id}/meta")
+def meta(batch_id: str):
+    result = github_service.get_batch_meta(batch_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail="No repository metadata recorded for this batch_id.")
+    return result

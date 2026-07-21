@@ -51,6 +51,13 @@ export default function Recommendations() {
     <PageShell title="AI Recommendation Panel" subtitle={`Tailored guidance for ${scan.filename}`}>
       {detail.suggested_rewrite.changed ? (
         <ChartCard title="Suggested Secure Rewrite" subtitle="Rule-based auto-fix — review before applying" className="mb-5">
+          {detail.suggested_rewrite.requires_manual_sizing && (
+            <div className="mb-3 text-[11px] text-(--status-warning) bg-(--status-warning)/10 rounded-lg p-2">
+              One or more fixes below use a <code className="mono">dest_size</code> placeholder, not a real number — this destination's actual
+              buffer capacity could not be determined from this code (it's likely a pointer parameter, not a stack array). Fill in the real
+              capacity before using this rewrite.
+            </div>
+          )}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             <div>
               <div className="text-[10px] uppercase tracking-wider text-(--status-critical) font-semibold mb-1.5">Original</div>

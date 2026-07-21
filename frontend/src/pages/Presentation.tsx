@@ -11,7 +11,10 @@ import Gauge from "../components/Gauge";
 import EmbeddingScatter from "../components/EmbeddingScatter";
 import { VerdictPill } from "../components/RiskBadge";
 import { useCountUp } from "../hooks/useCountUp";
-import { getDashboardStats, getScan, getScanDetail, getModelPerformance, type ScanResult, type ScanDetail } from "../api/client";
+import {
+  getDashboardStats, getScan, getScanDetail, getModelPerformance,
+  type ScanResult, type ScanDetail,
+} from "../api/client";
 
 const AUTOPLAY_MS = 7000;
 

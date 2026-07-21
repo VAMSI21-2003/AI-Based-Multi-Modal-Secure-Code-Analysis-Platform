@@ -364,6 +364,26 @@ if "project" in df.columns:
         print(f"    {project:<12} : {count}  ({pct:.1f}%)")
 
 
+# ── STEP 9.5: ASSIGN A STABLE ORIGINAL SAMPLE ID ─────────────────────────────
+#
+# Phase 4 forensic audit finding (docs/ML_FORENSIC_AUDIT_PHASE4.md): every
+# downstream extraction script (AST, metrics) used to invent its OWN
+# sample_id as `range(len(its_own_output))` -- which silently desynced from
+# the other scripts' numbering the moment either one dropped a different set
+# of rows (they used different, inconsistent length filters: 50 chars vs. 10
+# chars). Empirically, this caused 27,048 of 27,225 fused rows (99.35%) to
+# pair one function's label/AST features with a DIFFERENT function's
+# metrics/CodeBERT features.
+#
+# The fix: assign the stable ID exactly ONCE, here, immediately after
+# cleaning, tied to this DataFrame's row position at the moment it is first
+# saved -- every downstream script reads and CARRIES this same column
+# forward (never recomputes it from its own output length), and
+# fuse_features.py joins on THIS column, not a locally-recomputed range().
+df = df.reset_index(drop=True)
+df["original_id"] = range(len(df))
+
+
 # ── STEP 10: SAVE THE CLEANED DATASET ────────────────────────────────────────
 #
 # We save in two formats:
@@ -381,6 +401,8 @@ csv_path = os.path.join(PROCESSED_DIR, "devign_cleaned.csv")
 # We drop the helper column 'func_length' before saving — it was only for analysis
 df.drop(columns=["func_length"]).to_csv(csv_path, index=False, encoding="utf-8")
 print(f"  CSV saved  : {csv_path}")
+print(f"  Assigned a stable 'original_id' column (0 to {len(df) - 1}) -- every")
+print(f"  downstream extraction script must carry this column forward unchanged.")
 
 # ── Save as JSON ──
 json_out_path = os.path.join(PROCESSED_DIR, "devign_cleaned.json")

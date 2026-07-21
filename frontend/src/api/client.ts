@@ -59,7 +59,7 @@ export interface ScanDetail {
   ast_tree: { available: boolean; tree: any | null; error?: string };
   line_risks: LineRisk[];
   recommendations: { title: string; tips: string[] }[];
-  suggested_rewrite: { rewritten_code: string; changes: { description: string; occurrences: number }[]; changed: boolean };
+  suggested_rewrite: { rewritten_code: string; changes: { description: string; occurrences: number }[]; changed: boolean; requires_manual_sizing?: boolean };
   contributions: { feature: string; value: number; importance: number; z_score: number; contribution: number; direction: string }[] | null;
   pca_background: { explained_variance_ratio: number[]; points: { x: number; y: number; label: number | null }[] } | null;
 }
@@ -80,7 +80,10 @@ export interface DashboardStats {
 export interface BatchResult {
   batch_id: string;
   total_files_submitted: number;
+  files_detected: number;
   total_files_scanned: number;
+  files_skipped: number;
+  skip_reasons: string[];
   vulnerable_count: number;
   safe_count: number;
   results: ScanResult[];
@@ -351,11 +354,24 @@ export const getWatchDiff = (sessionId: string, filename: string) =>
 
 // ── GitHub Mode (Phase 6) ─────────────────────────────────────────────────────
 
-export interface GitHubScanResult { batch_id: string; repo_url: string; project_name: string; files_scanned: number; files_found: number; commits_recorded: number; }
+export interface GitHubScanResult {
+  batch_id: string; repo_url: string; repo_name?: string; project_name: string;
+  branch?: string | null; commit_sha?: string | null;
+  files_scanned: number; files_found: number; files_detected?: number;
+  files_skipped?: number; skip_reasons?: string[]; commits_recorded: number;
+}
 export interface GitHubCommit { hash: string; author: string; date: string; message: string; }
 
 export const scanGitHubRepo = (repoUrl: string, projectName?: string) =>
   api.post<GitHubScanResult>("/github/scan", { repo_url: repoUrl, project_name: projectName || undefined }, { timeout: 120000 }).then((r) => r.data);
+
+export interface GitHubBatchMeta {
+  batch_id: string; repo_url: string; repo_name: string; branch: string | null; commit_sha: string | null;
+  files_detected: number; files_analyzed: number; files_skipped: number; skip_reasons: string[];
+  scanned_at: string | null;
+}
+export const getGitHubBatchMeta = (batchId: string) =>
+  api.get<GitHubBatchMeta>(`/github/${batchId}/meta`).then((r) => r.data);
 
 export const getGitHubCommits = (batchId: string) =>
   api.get<{ batch_id: string; commits: GitHubCommit[] }>(`/github/${batchId}/commits`).then((r) => r.data.commits);
@@ -457,7 +473,7 @@ export interface LiveScanResult {
   line_risks?: LineRisk[];
   intelligence?: CodeIntelligence;
   recommendations?: { title: string; tips: string[] }[];
-  suggested_rewrite?: { rewritten_code: string; changed: boolean; changes: { description: string; occurrences: number }[] };
+  suggested_rewrite?: { rewritten_code: string; changed: boolean; changes: { description: string; occurrences: number }[]; requires_manual_sizing?: boolean };
   contributions?: { feature: string; value: number; importance: number; z_score: number; contribution: number; direction: string }[] | null;
 }
 

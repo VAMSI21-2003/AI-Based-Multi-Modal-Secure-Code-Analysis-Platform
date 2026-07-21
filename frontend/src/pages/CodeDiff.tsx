@@ -50,6 +50,13 @@ export default function CodeDiff() {
     >
       {scanId && loading && <Spinner label="Loading scan..." />}
 
+      {loadedFromScan && detail?.suggested_rewrite.requires_manual_sizing && (
+        <div className="mb-4 text-[11px] text-(--status-warning) bg-(--status-warning)/10 rounded-lg p-2.5">
+          This auto-fix contains one or more <code className="mono">dest_size</code> placeholders — the real buffer capacity could not be
+          determined from the scanned code (likely a pointer parameter, not a stack array). Fill in the real capacity before treating this as final.
+        </div>
+      )}
+
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-5 mb-5">
         <div>
           <div className="text-xs font-semibold text-(--status-critical) mb-1.5">Original Code</div>

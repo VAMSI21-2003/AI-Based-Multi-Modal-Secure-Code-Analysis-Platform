@@ -820,7 +820,9 @@ making large-scale code reviews time-consuming without GPU infrastructure.
 Implement a sliding window approach: split functions exceeding 512 tokens into
 overlapping windows, generate embeddings for each window, and aggregate through
 mean pooling or attention-weighted combination. This would recover vulnerability
-signals from the 12% of functions currently truncated.
+signals from the 45.5% of functions currently truncated (measured directly
+via `docs/ML_PIPELINE.md` §5 — an earlier draft cited 12%, which this figure
+corrects).
 
 **2. Control Flow Graph as a Fourth Modality**
 Add a CFG analysis branch as the fourth modality, extracting features such

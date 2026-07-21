@@ -174,7 +174,7 @@ RANDOM_STATE = 42    # random seed -- ensures the SAME split every run
 N_ESTIMATORS = 100   # number of decision trees in the ensemble
 
 # Metadata columns from final_features.csv that are NOT features
-METADATA_COLS = ["sample_id", "target", "project", "commit_id"]
+METADATA_COLS = ["sample_id", "target", "project", "commit_id", "func"]
 
 
 # ── SECTION 2: PATH SETUP ────────────────────────────────────────────────────

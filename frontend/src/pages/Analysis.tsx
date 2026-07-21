@@ -75,6 +75,21 @@ export default function Analysis() {
         </>
       }
     >
+      {scan.is_demo && (
+        <div className="mb-5 rounded-xl border p-4 flex items-start gap-3" style={{ background: "rgba(200,150,20,0.08)", borderColor: "rgba(200,150,20,0.35)" }}>
+          <ShieldAlert size={18} className="text-(--status-warning) shrink-0 mt-0.5" />
+          <div>
+            <div className="text-sm font-semibold text-(--status-warning)">Demo mode — not a trained-model prediction</div>
+            <div className="text-xs text-(--text-secondary) mt-1.5">
+              The trained XGBoost/Random Forest models were unavailable when this scan ran, so this result came from a
+              heuristic fallback ({scan.model_used}), not the real multi-modal ML pipeline. Feature contributions and
+              embedding placement below will show as unavailable for the same reason. Re-run this scan once the
+              trained models are loaded to get a real prediction.
+            </div>
+          </div>
+        </div>
+      )}
+
       {scan.evidence_risk?.escalated && (
         <div className="mb-5 rounded-xl border p-4 flex items-start gap-3" style={{ background: "rgba(208,59,59,0.08)", borderColor: "rgba(208,59,59,0.35)" }}>
           <ShieldAlert size={18} className="text-(--status-critical) shrink-0 mt-0.5" />

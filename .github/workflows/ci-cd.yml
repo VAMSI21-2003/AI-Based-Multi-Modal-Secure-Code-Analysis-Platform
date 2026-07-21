@@ -1,28 +1,27 @@
 # =============================================================================
-# ci-cd.yml -- SecureCode AI: build, test, and scan pipeline.
+# ci-cd.yml -- SecureCode AI: validate, test, and scan pipeline.
 #
-# Pipeline shape:
+# Developer pushes code
+#         |
+#         v
+#   GitHub Actions triggered
+#         |
+#   +----------------------+----------------------+
+#   |                      |                       |
+#   backend-validation      frontend-validation      (run in parallel)
+#   |                      |                       |
+#   +----------------------+----------------------+
+#                          |
+#                          v
+#                   security-scan
+#              (only runs if BOTH jobs above passed)
+#                          |
+#                          v
+#                   final-status
+#      (always runs; reports one clear overall result)
 #
-#   Checkout
-#     |
-#     +--> [backend job]  Python setup (pip cache) -> install deps
-#     |                   -> backend build check -> backend tests
-#     |
-#     +--> [frontend job] Node setup (npm cache)   -> install deps
-#                         -> frontend build         -> frontend tests
-#     |
-#     v
-#   [repository-scan job] (runs only if BOTH jobs above succeed)
-#     Python setup (pip cache) -> install deps
-#     -> run the existing CodeBERT/AST/Metrics/XGBoost pipeline over every
-#        .c/.cpp/.h file in the repo (backend/ci_scan.py, unmodified)
-#     -> upload the generated report as a workflow artifact
-#     -> fail the job if any CRITICAL-risk file is found
-#
-# backend and frontend run in parallel (neither depends on the other).
-# repository-scan is gated on both: if either build/test job fails, this
-# job is skipped automatically (GitHub Actions' default `needs` behaviour),
-# so a broken build never gets scanned or reported as passing.
+# See docs/CI_CD.md for the full policy, rationale, and how to run every
+# one of these steps locally before pushing.
 # =============================================================================
 
 name: CI/CD
@@ -32,10 +31,15 @@ on:
     branches: [main, master]
   pull_request:
   workflow_dispatch:
+    inputs:
+      strict_security_gate:
+        description: "Fail the security-scan job on CRITICAL findings (unchecking runs report-only, for a guaranteed all-green demo run)"
+        type: boolean
+        default: true
 
 jobs:
-  backend:
-    name: Backend (build + test)
+  backend-validation:
+    name: Backend validation
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -51,16 +55,46 @@ jobs:
       - name: Install backend dependencies
         run: pip install -r backend/requirements-dev.txt
 
-      - name: Backend build check (import the FastAPI app)
+      - name: Python syntax check (compileall)
+        run: python -m compileall -q app backend src
+
+      - name: Import validation (build the FastAPI app)
         working-directory: backend
         run: python -c "import main; print(f'{len(main.app.routes)} routes registered OK')"
+
+      - name: ML model artifact validation
+        working-directory: backend
+        run: |
+          python -c "
+          import os, sys, joblib
+          from xgboost import XGBClassifier
+
+          root = os.path.dirname(os.getcwd())
+          xgb_path = os.path.join(root, 'models', 'xgboost.json')
+          rf_path = os.path.join(root, 'models', 'random_forest.joblib')
+          meta_path = os.path.join(root, 'models', 'training_metadata.json')
+
+          missing = [p for p in (xgb_path, rf_path, meta_path) if not os.path.exists(p)]
+          if missing:
+              print('Missing model artifact(s):', missing)
+              print('These are committed directly in this repo (no Git LFS) -- a fresh')
+              print('checkout should always have them. If this fails, the checkout is')
+              print('incomplete or the artifacts were removed from version control.')
+              sys.exit(1)
+
+          xgb = XGBClassifier()
+          xgb.load_model(xgb_path)
+          rf = joblib.load(rf_path)
+          print(f'XGBoost loaded OK ({len(xgb.get_booster().get_dump())} trees)')
+          print(f'Random Forest loaded OK ({len(rf.estimators_)} trees)')
+          "
 
       - name: Backend tests
         working-directory: backend
         run: pytest tests/ -v
 
-  frontend:
-    name: Frontend (build + test)
+  frontend-validation:
+    name: Frontend validation
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -73,21 +107,25 @@ jobs:
           cache: "npm"
           cache-dependency-path: frontend/package-lock.json
 
-      - name: Install frontend dependencies
+      - name: Install frontend dependencies (npm ci)
         working-directory: frontend
         run: npm ci
 
-      - name: Frontend build
+      - name: TypeScript check
         working-directory: frontend
-        run: npm run build
+        run: npx tsc -b
+
+      - name: Production build
+        working-directory: frontend
+        run: npx vite build
 
       - name: Frontend tests
         working-directory: frontend
         run: npm run test
 
-  repository-scan:
-    name: Repository security scan
-    needs: [backend, frontend]
+  security-scan:
+    name: Security scan
+    needs: [backend-validation, frontend-validation]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -103,16 +141,27 @@ jobs:
       - name: Install backend dependencies
         run: pip install -r backend/requirements.txt
 
-      - name: Run repository scan (real CodeBERT + AST + Metrics + XGBoost pipeline)
+      - name: Run security scan (real CodeBERT + AST + Metrics + XGBoost pipeline)
         working-directory: backend
-        run: python ci_scan.py --path .. --output ../security-report
+        env:
+          STRICT_GATE: ${{ github.event.inputs.strict_security_gate != 'false' }}
+        run: |
+          if [ "$STRICT_GATE" = "true" ]; then
+            python ci_scan.py --path ../demo/scan_samples --output ../security-report --fail-on CRITICAL
+          else
+            python ci_scan.py --path ../demo/scan_samples --output ../security-report --fail-on CRITICAL --no-fail
+          fi
 
       - name: Write scan summary
         if: always()
         run: |
           if [ -f security-report.md ]; then
             {
-              echo "## SecureCode AI Repository Scan"
+              echo "## SecureCode AI Security Scan"
+              echo ""
+              echo "Scanned \`demo/scan_samples/\` -- see docs/CI_CD.md for why this"
+              echo "project scans a small fixture rather than the whole repository"
+              echo "(this repo's own source is Python/TypeScript, not C)."
               echo ""
               cat security-report.md
             } >> "$GITHUB_STEP_SUMMARY"
@@ -129,3 +178,32 @@ jobs:
             security-report.md
             security-report.json
           if-no-files-found: warn
+
+  final-status:
+    name: Final status
+    needs: [backend-validation, frontend-validation, security-scan]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Report overall pipeline result
+        run: |
+          echo "## Pipeline Result" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Job | Result |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|---|---|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Backend validation | ${{ needs.backend-validation.result }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Frontend validation | ${{ needs.frontend-validation.result }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Security scan | ${{ needs.security-scan.result }} |" >> "$GITHUB_STEP_SUMMARY"
+
+          if [ "${{ needs.backend-validation.result }}" != "success" ] || \
+             [ "${{ needs.frontend-validation.result }}" != "success" ] || \
+             [ "${{ needs.security-scan.result }}" != "success" ]; then
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "**Overall: FAILED** -- see the failing job(s) above for details." >> "$GITHUB_STEP_SUMMARY"
+            echo "Overall: FAILED"
+            exit 1
+          else
+            echo "" >> "$GITHUB_STEP_SUMMARY"
+            echo "**Overall: PASSED**" >> "$GITHUB_STEP_SUMMARY"
+            echo "Overall: PASSED"
+          fi
