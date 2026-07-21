@@ -1,0 +1,174 @@
+{
+  "test_size": 0.2,
+  "random_state": 42,
+  "n_estimators": 100,
+  "scale_pos_weight": 1.19,
+  "n_train": 21784,
+  "n_test": 5447,
+  "column_groups": {
+    "ast": [
+      "n_functions",
+      "n_loops",
+      "n_if_statements",
+      "n_assignments",
+      "n_returns",
+      "n_pointer_ops",
+      "n_function_calls",
+      "n_binary_ops",
+      "max_depth",
+      "n_total_nodes",
+      "n_error_nodes"
+    ],
+    "metrics": [
+      "loc",
+      "function_count",
+      "loop_count",
+      "if_count",
+      "return_count",
+      "avg_line_length",
+      "max_line_length",
+      "comment_count",
+      "total_lines",
+      "blank_lines",
+      "nesting_depth",
+      "operator_count",
+      "pointer_count"
+    ],
+    "codebert_count": 768
+  },
+  "results": [
+    {
+      "name": "CodeBERT only",
+      "n_features": 768,
+      "accuracy": 0.5891,
+      "precision": 0.551,
+      "recall": 0.5328,
+      "f1": 0.5418,
+      "auc": 0.6309,
+      "confusion_matrix": [
+        [
+          1886,
+          1078
+        ],
+        [
+          1160,
+          1323
+        ]
+      ]
+    },
+    {
+      "name": "AST only",
+      "n_features": 11,
+      "accuracy": 0.5568,
+      "precision": 0.5151,
+      "recall": 0.4744,
+      "f1": 0.4939,
+      "auc": 0.5757,
+      "confusion_matrix": [
+        [
+          1855,
+          1109
+        ],
+        [
+          1305,
+          1178
+        ]
+      ]
+    },
+    {
+      "name": "Metrics only",
+      "n_features": 13,
+      "accuracy": 0.5647,
+      "precision": 0.527,
+      "recall": 0.4402,
+      "f1": 0.4797,
+      "auc": 0.5883,
+      "confusion_matrix": [
+        [
+          1983,
+          981
+        ],
+        [
+          1390,
+          1093
+        ]
+      ]
+    },
+    {
+      "name": "AST + Metrics (no CodeBERT)",
+      "n_features": 24,
+      "accuracy": 0.5757,
+      "precision": 0.5399,
+      "recall": 0.4688,
+      "f1": 0.5018,
+      "auc": 0.6076,
+      "confusion_matrix": [
+        [
+          1972,
+          992
+        ],
+        [
+          1319,
+          1164
+        ]
+      ]
+    },
+    {
+      "name": "CodeBERT + AST (no metrics)",
+      "n_features": 779,
+      "accuracy": 0.5937,
+      "precision": 0.5569,
+      "recall": 0.5324,
+      "f1": 0.5444,
+      "auc": 0.6327,
+      "confusion_matrix": [
+        [
+          1912,
+          1052
+        ],
+        [
+          1161,
+          1322
+        ]
+      ]
+    },
+    {
+      "name": "CodeBERT + Metrics (no AST)",
+      "n_features": 781,
+      "accuracy": 0.5888,
+      "precision": 0.5526,
+      "recall": 0.5139,
+      "f1": 0.5326,
+      "auc": 0.6328,
+      "confusion_matrix": [
+        [
+          1931,
+          1033
+        ],
+        [
+          1207,
+          1276
+        ]
+      ]
+    },
+    {
+      "name": "Full fusion (AST + Metrics + CodeBERT)",
+      "n_features": 792,
+      "accuracy": 0.5932,
+      "precision": 0.5574,
+      "recall": 0.5219,
+      "f1": 0.5391,
+      "auc": 0.6346,
+      "confusion_matrix": [
+        [
+          1935,
+          1029
+        ],
+        [
+          1187,
+          1296
+        ]
+      ]
+    }
+  ]
+}
