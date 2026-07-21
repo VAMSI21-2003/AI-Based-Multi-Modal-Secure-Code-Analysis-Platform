@@ -3,7 +3,15 @@ import { useLocation, useSearchParams } from "react-router-dom";
 import toast from "react-hot-toast";
 import { listWatchSessions, getWatchEvents } from "../api/client";
 
-const POLL_MS = 4000;
+// Two cadences, not one fixed interval: this component used to poll
+// /api/watch/sessions every 4s on EVERY page, forever, even for users who
+// have never once started a watch session -- pure wasted background
+// traffic for the overwhelmingly common case. IDLE_POLL_MS is the "is
+// anything even running?" heartbeat; ACTIVE_POLL_MS (the original cadence)
+// only kicks in once a running session is actually confirmed to exist, so
+// responsiveness while genuinely watching is unchanged.
+const IDLE_POLL_MS = 30_000;
+const ACTIVE_POLL_MS = 4_000;
 
 /**
  * Cross-page Watch Mode notifications (Phase 4). WatchMode.tsx already polls
@@ -27,17 +35,21 @@ export default function GlobalWatchNotifier() {
 
   useEffect(() => {
     let cancelled = false;
+    let timeoutId: ReturnType<typeof setTimeout>;
 
     const poll = async () => {
       let sessions;
       try {
         sessions = await listWatchSessions();
       } catch {
+        if (!cancelled) timeoutId = setTimeout(poll, IDLE_POLL_MS);
         return;
       }
       if (cancelled) return;
 
-      for (const s of sessions.filter((s) => s.status === "running")) {
+      const running = sessions.filter((s) => s.status === "running");
+
+      for (const s of running) {
         const since = sinceRef.current[s.session_id];
 
         // First sighting of a running session: baseline the cursor at its
@@ -72,11 +84,12 @@ export default function GlobalWatchNotifier() {
           }
         } catch { /* transient -- retried next tick */ }
       }
+
+      if (!cancelled) timeoutId = setTimeout(poll, running.length > 0 ? ACTIVE_POLL_MS : IDLE_POLL_MS);
     };
 
     poll();
-    const id = setInterval(poll, POLL_MS);
-    return () => { cancelled = true; clearInterval(id); };
+    return () => { cancelled = true; clearTimeout(timeoutId); };
   }, []);
 
   return null;
