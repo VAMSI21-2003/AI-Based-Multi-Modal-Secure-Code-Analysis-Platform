@@ -223,13 +223,25 @@ def dependency_graph(batch_id: str, db: Session = Depends(get_db)):
             func_owner[f["name"]] = r.filename
 
     func_adjacency = {}
+    _node_id_seen: Counter = Counter()
     for r in records:
         intel = per_file_intel.get(r.filename, {})
         if not intel.get("available"):
             continue
         base = r.filename.rsplit("/", 1)[-1].rsplit("\\", 1)[-1]
         for f in intel["functions"]:
-            node_id = f"{r.filename}::{f['name']}"
+            # Usually unique, but code_intelligence._function_name() falls
+            # back to the literal string "anonymous" whenever a function's
+            # declarator can't be resolved (common with macro-heavy test
+            # frameworks) -- multiple such functions in the same file then
+            # collide on this id, which React used as a list key and
+            # rejected ("Encountered two children with the same key").
+            # Only the 2nd+ occurrence of a given id gets a suffix, so a
+            # file with no collisions produces byte-identical ids to before.
+            base_node_id = f"{r.filename}::{f['name']}"
+            occurrence = _node_id_seen[base_node_id]
+            _node_id_seen[base_node_id] += 1
+            node_id = base_node_id if occurrence == 0 else f"{base_node_id}#{occurrence}"
             function_nodes.append({
                 "id": node_id, "label": f["name"], "type": "internal", "file": r.filename,
                 "kind": "dangerous" if f["dangerous_apis"] else ("complex" if f["cyclomatic_complexity"] >= 8 else "normal"),
