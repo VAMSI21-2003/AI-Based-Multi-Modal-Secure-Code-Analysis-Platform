@@ -160,7 +160,14 @@ your workflow, not before.
 1. **GitHub Security tab** (`Security → Code scanning`) — every finding is
    uploaded as SARIF (`github/codeql-action/upload-sarif`), so it appears
    natively alongside any other code-scanning tool, with file/line
-   locations and CWE-based rule IDs.
+   locations and CWE-based rule IDs. **Only works on a public repo, or a
+   private repo with GitHub Advanced Security** — GHAS isn't purchasable
+   for a private repo under a personal (non-Enterprise) account, so on such
+   a repo this upload step always fails with "Code scanning is not enabled
+   for this repository" (confirmed against a real run on this project's own
+   private repo). The upload step is `continue-on-error: true` for exactly
+   this reason — sources 2-4 below are unaffected and remain the reliable
+   way to see results on a private personal-account repo.
 2. **The PR itself** — one comment (created once, then updated in place on
    every subsequent run of the same PR, not duplicated) summarizing files
    scanned, severity breakdown, model mode, and the ML baseline status

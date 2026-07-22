@@ -219,6 +219,16 @@ jobs:
 
       - name: Upload SARIF to the Security tab
         if: always()
+        # Non-blocking: GitHub's code-scanning/Security-tab feature requires
+        # GitHub Advanced Security, which isn't purchasable for a private
+        # repo under a personal (non-Enterprise) account -- this step will
+        # always fail with "Code scanning is not enabled for this
+        # repository" on such a repo (observed on this repo's first real PR
+        # run, 29906616569), regardless of the permissions granted above.
+        # The actual scan results are still captured via the report artifact
+        # (below) and the PR comment, so this is a nice-to-have, not the
+        # core scan output -- it shouldn't sink an otherwise-passing run.
+        continue-on-error: true
         uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: security-report.sarif
