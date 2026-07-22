@@ -6,6 +6,7 @@ uvicorn[standard]==0.49.0
 pydantic==2.13.4
 SQLAlchemy==2.0.51
 python-multipart==0.0.32
+psutil==7.2.2
 
 # ML pipeline (unchanged versions -- do not bump without retraining/revalidating)
 torch==2.12.0
