@@ -67,6 +67,14 @@ class ScanRecord(Base):
     is_pinned = Column(Integer, default=0)
     tags = Column(Text, default="")
 
+    # Apply-Patch -> Re-Scan loop (docs/APPLY_PATCH_LOOP_DESIGN.md): nullable
+    # link from a patched, derived scan back to the original it was applied
+    # from. NULL for every ordinary scan (paste/batch/GitHub/live) -- only
+    # set on records created by POST /api/scan/{id}/apply-patch. No FK
+    # constraint (SQLite + this codebase's existing columns don't use them
+    # elsewhere either, e.g. batch_id above), just an indexed lookup column.
+    derived_from_scan_id = Column(String, index=True, nullable=True)
+
     created_at = Column(DateTime, default=dt.datetime.utcnow, index=True)
 
 
@@ -109,6 +117,8 @@ def _migrate_add_columns():
             conn.execute(text("ALTER TABLE scans ADD COLUMN is_pinned INTEGER DEFAULT 0"))
         if "tags" not in existing:
             conn.execute(text("ALTER TABLE scans ADD COLUMN tags TEXT DEFAULT ''"))
+        if "derived_from_scan_id" not in existing:
+            conn.execute(text("ALTER TABLE scans ADD COLUMN derived_from_scan_id TEXT"))
         conn.commit()
 
 
