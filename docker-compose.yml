@@ -24,7 +24,14 @@ services:
       interval: 30s
       timeout: 5s
       retries: 3
-      start_period: 30s
+      # A cold start (no cached HuggingFace weights yet -- first run, or after
+      # `docker compose down -v`/a fresh volume) downloads CodeBERT before
+      # the app can serve /api/health, observed taking ~2.5-3 minutes on a
+      # real run. 30s previously meant `docker ps` reported "unhealthy" for
+      # a container that was actually fine, just still starting -- the app
+      # itself was never broken (confirmed: real scans succeeded through it
+      # during that window), only the healthcheck's timing was too tight.
+      start_period: 200s
 
   frontend:
     build:
