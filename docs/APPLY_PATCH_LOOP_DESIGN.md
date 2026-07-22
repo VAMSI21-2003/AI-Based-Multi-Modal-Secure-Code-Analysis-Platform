@@ -1,9 +1,11 @@
-# Apply-Patch → Re-Scan → Before/After Loop — Design (not implemented)
+# Apply-Patch → Re-Scan → Before/After Loop — Design (implemented)
 
-**This is a design report only — nothing described here has been built.**
-Completes the remediation story end-to-end instead of AutoPatch.tsx's
-current read-only diffs. Needs sign-off before any code is written, since
-it's a new user-facing workflow, not a bug fix.
+**Status: implemented.** Completes the remediation story end-to-end
+instead of AutoPatch.tsx's previous read-only diffs. Built in 5 phases
+(schema → backend endpoint → frontend apply action → before/after
+comparison → docs), each committed and tested independently — see
+"Implementation notes" (§6) below for what was actually built and where it
+deviated from this design, and why.
 
 ## 1. What "apply" actually does to the file — there usually isn't one
 
@@ -136,3 +138,58 @@ rewrite-then-rescan on page load or on a timer.
    elsewhere (§3).
 4. Confirm the block/warn behavior for `requires_manual_sizing` cases
    (§2) rather than silently allowing apply on an incomplete template.
+
+## 6. Implementation notes
+
+All 4 sign-off questions in §5 were confirmed as designed: apply = new DB
+record (never a file write, Watch Mode's disk-write option not built),
+`derived_from_scan_id` added, UI placed inline on AutoPatch.tsx (the
+recommended option), and `requires_manual_sizing` blocks rather than warns
+past. Two real deviations from the letter of the brief, both for reasons
+worth recording:
+
+- **Phase 2 was briefed as taking "a finding/patch identifier + the
+  generated rewrite code."** The shipped endpoint
+  (`POST /api/scan/{id}/apply-patch`) takes a `patch_id` (informational
+  only — identifies which AutoPatch.tsx card was clicked, for the
+  response/UI's own reference) but does **not** accept or trust a
+  client-supplied rewritten-code string. It always recomputes
+  `recommendations.suggest_secure_rewrite()` itself, server-side, from the
+  scan's own stored `code`. Reasoning: the CRITICAL SAFETY CHECK (§2's
+  `requires_manual_sizing` block) only means something if the code being
+  checked and the code being applied are provably the same string — taking
+  "already fixed" code from the client and checking a *separately
+  recomputed* rewrite against it would let a tampered request desync the
+  two and bypass the block. Recomputing server-side closes that gap
+  entirely rather than trusting the caller.
+- **Per-card vs. whole-file safety scope.** AutoPatch.tsx's `size_known` is
+  computed per detected occurrence (`auto_patch.py`, one card per line);
+  `suggest_secure_rewrite()`'s `requires_manual_sizing` is computed over
+  the *whole file's* rewrite (`recommendations.py`). These are different
+  scopes built by different, pre-existing engines this design deliberately
+  reused rather than replaced. Consequence, disclosed rather than
+  papered over: a card can appear apply-eligible client-side (its own
+  occurrence has a known size) and still come back blocked by the server
+  if a *different* occurrence elsewhere in the same file is unknown —
+  the file-wide block always wins, since applying a mix of real fixes and
+  unresolved templates would be the exact dishonesty §2 exists to prevent.
+  The frontend surfaces this 422 exactly as returned (reason + note), never
+  hides or retries around it.
+
+Everything else shipped exactly as designed: derived scans never mutate
+the original (verified — original's code/vuln_probability provably
+unchanged after apply, in both the blocked and success paths); re-scan
+uses the current per-function inference path automatically, since
+`ml_bridge.run_prediction()` already routes through it post-redesign — no
+inference-path code needed changing; the before/after comparison reports
+verdict/probability deltas plainly regardless of direction, per §4's own
+insistence that "after" isn't assumed to always be "better" (confirmed
+live: the one real example run during implementation moved 95.0% → 90.8%
+with the verdict staying VULNERABLE in both, not a flip to NOT VULNERABLE
+— shown as-is, not reframed as a win). The ML/fusion pipeline, the 0.26
+threshold, and the trained models were not touched anywhere in this work.
+
+Verified live against the real running app (not just tsc/pytest): a known-
+safe `strcpy` fix applying cleanly with a real derived score, and a
+pointer-parameter destination correctly showing no Apply button at all
+with the size-unknown warning explicitly noting apply is unavailable.
