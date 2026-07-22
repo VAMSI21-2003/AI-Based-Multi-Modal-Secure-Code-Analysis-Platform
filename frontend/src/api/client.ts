@@ -6,17 +6,19 @@ export const api = axios.create({
 });
 
 // Scan-triggering calls (single-file, batch/ZIP/folder, GitHub, live) can
-// legitimately run for minutes on a large real-world repo -- e.g. a 200-file
-// GitHub scan measured at 186-249s in practice, well past the 120s default
-// above. Configurable via VITE_SCAN_TIMEOUT_MS so this can be tuned per
-// deployment without a code change; defaults to 10 minutes.
+// legitimately run for minutes on a large real-world repo, well past the
+// 120s default above. Configurable via VITE_SCAN_TIMEOUT_MS so this can be
+// tuned per deployment without a code change; defaults to 20 minutes --
+// bumped from 10 min after per-function inference
+// (docs/PER_FUNCTION_INFERENCE_DESIGN.md) measured a real 200-file GitHub
+// scan (curl) at 797.5s server-side, already past the old 10-minute default.
 //
 // This is a stopgap, not the real fix: a long-running scan is still one
 // blocking HTTP request that ties up a connection and gives no progress
 // feedback. The proper fix is an async job (submit -> poll status/progress
 // -> fetch result when done) instead of one long request -- out of scope
 // for this change.
-const SCAN_TIMEOUT_MS = Number(import.meta.env.VITE_SCAN_TIMEOUT_MS) || 600_000;
+const SCAN_TIMEOUT_MS = Number(import.meta.env.VITE_SCAN_TIMEOUT_MS) || 1_200_000;
 
 // ── Types ────────────────────────────────────────────────────────────────
 
