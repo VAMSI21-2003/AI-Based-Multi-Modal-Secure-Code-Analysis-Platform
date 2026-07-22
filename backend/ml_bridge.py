@@ -21,6 +21,7 @@ import functools
 from typing import Optional
 
 import system_monitor
+import code_intelligence
 
 import numpy as np
 
@@ -48,6 +49,7 @@ from predictor import (      # noqa: E402
     load_codebert_components,
     extract_codebert_embedding,
     predict_with_model,
+    predict_functions_with_model,
     demo_predict,
     XGB_MODEL_PATH,
     RF_MODEL_PATH,
@@ -86,9 +88,23 @@ def models_status() -> dict:
 
 def run_prediction(code: str, model_choice: str = "XGBoost") -> dict:
     """
-    Runs the EXACT same pipeline as the original Streamlit app:
-    AST + Metrics + CodeBERT -> 792-dim vector -> trained classifier.
-    Falls back to the heuristic demo predictor if no trained model exists.
+    Runs the trained pipeline: AST + Metrics + CodeBERT -> 792-dim vector ->
+    trained classifier. Falls back to the heuristic demo predictor if no
+    trained model exists.
+
+    Per-function inference (docs/PER_FUNCTION_INFERENCE_DESIGN.md): `code`
+    is split into its individual functions first (same tree-sitter grammar
+    code_intelligence.py already uses elsewhere), and the pipeline above
+    runs independently per function -- matching the granularity the model
+    was actually trained on (Devign rows are individual functions), instead
+    of the whole file, which was silently truncating most real files'
+    CodeBERT input to their first ~15% (measured: 80% of real files exceed
+    512 tokens, vs. 45.5% for individual functions). The file-level verdict
+    returned is the WORST function's result (max vuln_probability) -- the
+    same "escalate to the worst signal, never suppress" principle already
+    used by evidence_based_risk() below, not a new scheme. Files with no
+    detected functions (headers, unparseable code) fall back to the
+    original whole-code path unchanged.
     """
     _t0 = time.time()
 
@@ -108,7 +124,7 @@ def run_prediction(code: str, model_choice: str = "XGBoost") -> dict:
 
     if active_model is not None:
         tokenizer, codebert_model = get_codebert()
-        result = predict_with_model(code, active_model, active_name, tokenizer, codebert_model)
+        result = _predict_per_function_or_whole(code, active_model, active_name, tokenizer, codebert_model)
         result["is_demo"] = False
     else:
         result = demo_predict(code)
@@ -117,6 +133,31 @@ def run_prediction(code: str, model_choice: str = "XGBoost") -> dict:
         result.get("ast_features", {}), result.get("metric_features", {})
     )
     system_monitor.record_prediction_latency(time.time() - _t0)
+    return result
+
+
+def _predict_per_function_or_whole(code: str, model, model_name: str, tokenizer, codebert_model) -> dict:
+    functions = code_intelligence.extract_functions(code)
+    if not functions:
+        # No function_definition nodes found (header, unparseable code, or
+        # tree-sitter unavailable) -- unchanged whole-code behavior.
+        result = predict_with_model(code, model, model_name, tokenizer, codebert_model)
+        result["function_results"] = None
+        result["functions_analyzed"] = 0
+        return result
+
+    function_results = predict_functions_with_model(functions, model, model_name, tokenizer, codebert_model)
+
+    # Max risk wins -- never averaged, never top-N. See the run_prediction
+    # docstring above and docs/PER_FUNCTION_INFERENCE_DESIGN.md Section 3.
+    worst = max(function_results, key=lambda r: r["vuln_probability"])
+    result = dict(worst)
+    result["embedding_source"] = (
+        f"CodeBERT (microsoft/codebert-base), batched per-function over {len(function_results)} function(s)"
+    )
+    result["feature_vector_shape"] = (len(function_results), 792)
+    result["function_results"] = function_results
+    result["functions_analyzed"] = len(function_results)
     return result
 
 

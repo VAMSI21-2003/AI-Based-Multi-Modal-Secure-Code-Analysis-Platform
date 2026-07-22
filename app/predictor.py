@@ -276,6 +276,124 @@ def extract_codebert_embedding(code: str, tokenizer, model) -> np.ndarray:
         return np.zeros(768, dtype=np.float64)
 
 
+# ── FUNCTION 4b: extract_codebert_embeddings_batch ───────────────────────────
+#
+# Per-function live inference (docs/PER_FUNCTION_INFERENCE_DESIGN.md) needs
+# one CodeBERT embedding per function in a scanned file, not one per file --
+# a real repo can have 5-15x more functions than files (measured on real
+# repos: zlib 5.4, mbedTLS 8.9, libpng 14.5 functions/file). Calling
+# extract_codebert_embedding() once per function sequentially would make
+# batch/GitHub scans of real repos impractically slow. This batches multiple
+# functions into ONE tokenizer call + ONE forward pass instead, in chunks
+# (BATCH_SIZE) so a single pathological file with hundreds of functions
+# can't spike memory in one shot.
+
+BATCH_SIZE = 16
+
+
+def extract_codebert_embeddings_batch(codes: list, tokenizer, model, batch_size: int = BATCH_SIZE) -> np.ndarray:
+    """
+    Same tokenization settings as extract_codebert_embedding (max_length=512,
+    truncation=True, padding="max_length") applied to a LIST of code strings
+    in batched forward pass(es) instead of one call per string.
+
+    Parameters:
+        codes  (list[str]): one code string per item to embed (e.g. one per
+                             function in a scanned file).
+        batch_size   (int): how many items to tokenize/run together per
+                             forward pass. Chunks `codes` into groups of at
+                             most this size rather than one single batch, so
+                             a file with an unusually large number of
+                             functions can't spike memory in one shot.
+
+    Returns:
+        np.ndarray of shape (len(codes), 768), one row per input, in the
+        same order. If a chunk's forward pass fails, that chunk's rows are
+        zero vectors (matching extract_codebert_embedding's single-item
+        fallback behavior) rather than failing every function's result.
+    """
+    if not codes:
+        return np.zeros((0, 768), dtype=np.float64)
+
+    chunks = []
+    for start in range(0, len(codes), batch_size):
+        chunk = codes[start:start + batch_size]
+        try:
+            import torch
+
+            inputs = tokenizer(
+                chunk,
+                return_tensors="pt",
+                max_length=512,
+                truncation=True,
+                padding="max_length",
+            )
+            with torch.no_grad():
+                output = model(**inputs)
+            # output.last_hidden_state shape: (batch, seq_len, 768).
+            # [:, 0, :] takes the [CLS] token for every item in the batch at once.
+            cls_embeddings = output.last_hidden_state[:, 0, :].cpu().numpy()
+            chunks.append(cls_embeddings)
+        except Exception as e:
+            logger.warning("Batched CodeBERT inference failed for a chunk of %d function(s): %s", len(chunk), e)
+            chunks.append(np.zeros((len(chunk), 768), dtype=np.float64))
+
+    return np.vstack(chunks)
+
+
+# ── FUNCTION 4c: predict_functions_with_model ────────────────────────────────
+
+def predict_functions_with_model(functions: list, model, model_name: str,
+                                  tokenizer, codebert_model) -> list:
+    """
+    Runs the full prediction pipeline (AST + metrics + CodeBERT -> 792-dim
+    vector -> trained classifier) independently for each function in
+    `functions`, the same per-item logic predict_with_model() uses for a
+    single whole input -- but with CodeBERT embeddings computed in batched
+    forward pass(es) via extract_codebert_embeddings_batch() rather than one
+    call per function.
+
+    Parameters:
+        functions (list[dict]): each dict must have a "text" key (the
+            function's source). Any other keys (e.g. "name", "start_line",
+            "end_line") are carried through into that function's result
+            unchanged -- this function doesn't need to know what they mean.
+        model, model_name, tokenizer, codebert_model: same as predict_with_model.
+
+    Returns:
+        list[dict], one verdict dict per function (same shape get_verdict()
+        produces, plus ast_features/metric_features/embedding_dims and every
+        extra key the input dict carried), in the same order as `functions`.
+    """
+    texts = [f["text"] for f in functions]
+    if tokenizer is not None and codebert_model is not None:
+        embeddings = extract_codebert_embeddings_batch(texts, tokenizer, codebert_model)
+    else:
+        embeddings = np.zeros((len(functions), 768), dtype=np.float64)
+
+    results = []
+    for fn, embedding in zip(functions, embeddings):
+        ast_feats = extract_ast_features(fn["text"])
+        metric_feats = extract_metric_features(fn["text"])
+        feature_vector = build_feature_vector(ast_feats, metric_feats, embedding)
+        X = feature_vector.reshape(1, -1)
+
+        probabilities = model.predict_proba(X)[0]
+        vuln_probability = float(probabilities[1])
+        prediction = int(vuln_probability >= VULNERABILITY_THRESHOLD)
+
+        result = get_verdict(prediction, vuln_probability, model_name)
+        for key, value in fn.items():
+            if key != "text":
+                result[key] = value
+        result["ast_features"] = ast_feats
+        result["metric_features"] = metric_feats
+        result["embedding_dims"] = int(embedding.shape[0])
+        results.append(result)
+
+    return results
+
+
 # ── FUNCTION 5: predict_with_model ───────────────────────────────────────────
 
 def predict_with_model(code: str, model, model_name: str,

@@ -162,6 +162,36 @@ def find_functions(root):
     return _find_all(root, {"function_definition"})
 
 
+def extract_functions(code: str) -> list:
+    """
+    Splits `code` into its top-level function definitions using the same
+    tree-sitter grammar/parse() + find_functions() this module already uses
+    elsewhere (Call Graph Explorer, dependency graph, etc.) -- no new
+    parsing logic. Returns a list of {"name", "start_line", "end_line",
+    "text"} dicts, one per function, in source order.
+
+    Used by ml_bridge.run_prediction() for per-function live inference
+    (docs/PER_FUNCTION_INFERENCE_DESIGN.md) so CodeBERT sees individual
+    functions (matching training) instead of a whole file. Returns [] if
+    tree-sitter is unavailable or the code contains no function_definition
+    nodes (e.g. a header with only declarations) -- callers must treat that
+    as a normal "nothing to split" outcome, not an error, and fall back to
+    whole-code handling.
+    """
+    root, source = parse(code)
+    if root is None:
+        return []
+    out = []
+    for fn in find_functions(root):
+        out.append({
+            "name": _function_name(fn, source),
+            "start_line": fn.start_point[0] + 1,
+            "end_line": fn.end_point[0] + 1,
+            "text": _decode(fn, source),
+        })
+    return out
+
+
 def find_global_variables(root, source) -> list:
     """
     File-scope (global) variable names -- direct children of the translation
