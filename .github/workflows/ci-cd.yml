@@ -170,6 +170,16 @@ jobs:
       - name: Compute changed files (pull_request only)
         if: github.event_name == 'pull_request'
         run: |
+          # Defensive fetch: the auto-generated PR merge ref checked out above
+          # can momentarily lag behind a base branch that was updated right
+          # before this run (observed in practice: fetch-depth 0 checked out
+          # a merge commit whose parent chain didn't yet include the base
+          # SHA reported in the event payload, causing `git diff` to fail
+          # with "fatal: bad object"). Fetching both SHAs explicitly makes
+          # this step correct regardless of that timing.
+          git fetch --no-tags origin \
+            "${{ github.event.pull_request.base.sha }}" \
+            "${{ github.event.pull_request.head.sha }}" || true
           git diff --name-only --diff-filter=ACMR \
             "${{ github.event.pull_request.base.sha }}" "${{ github.event.pull_request.head.sha }}" \
             > changed_files.txt
