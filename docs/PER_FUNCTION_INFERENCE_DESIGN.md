@@ -142,3 +142,105 @@ different purposes.
    surface would eventually live (a new page, or an expansion of an
    existing one) — not designed here, since it's downstream of this
    decision, not a prerequisite for it.
+
+---
+
+## 8. Implementation notes (added after sign-off and implementation)
+
+All three sign-off questions above were confirmed as designed and
+implemented without deviation: max-risk aggregation (§3, unchanged),
+batched CodeBERT inference (§4, implemented as required, not deferred),
+and the additive `function_results`/`functions_analyzed` response fields
+(§5, unchanged; a drill-down UI remains out of scope, deferred per
+explicit direction this session).
+
+### What was built, exactly
+
+- `code_intelligence.extract_functions(code)` — the walker described in
+  §2, built exactly as designed: `parse()` + `find_functions()`, no new
+  parsing logic. Returns `[]` for files with no functions, confirmed via
+  tests to correctly fall back to the original whole-code path.
+- `app/predictor.py`: `extract_codebert_embeddings_batch()` (chunked at
+  `BATCH_SIZE = 16` — a detail not fully specified in the design, added
+  during implementation so one pathological file with hundreds of
+  functions can't spike memory in a single forward pass) and
+  `predict_functions_with_model()` (per-function AST/metrics/classifier,
+  reusing the batched embeddings).
+- `backend/ml_bridge.py`: `run_prediction()` now calls
+  `_predict_per_function_or_whole()`, which does the split → batch-embed →
+  classify-per-function → max-aggregate sequence, then carries the full
+  breakdown in `function_results`.
+- Touches confirmed to stay clear of the forbidden list, as designed:
+  only `app/predictor.py`, `backend/ml_bridge.py`,
+  `backend/code_intelligence.py`. Nothing in `src/ast/`, `src/metrics/`,
+  `src/fusion/`, `fusion_core.py`, the 0.26 threshold, or any trained
+  model file was touched.
+
+### Real before/after numbers (not estimated)
+
+**Truncation rate** — re-measured on the same 150-file real-repo sample
+(mbedTLS, libpng, zlib) used for the original whole-file measurement:
+
+| | Before (whole-file) | After (per-function) |
+|---|---|---|
+| Truncation rate | **80%** of files | **30.1%** of functions |
+| Sample size | 150 files | 1,544 functions (from the same 150 files; 52 of the 150 files had no function bodies to split — header-only files, correctly fell back to whole-code) |
+| Median | 3,443 tokens/file | 260 tokens/function |
+
+30.1% is *better* than the 45.5% training-corpus baseline cited as the
+target in §1 — real-world repo functions (this sample) skew shorter on
+average than Devign's commit-diff-selected training functions, which was
+not something the design predicted either way but is a plausible,
+measured explanation, not assumed.
+
+**Scan duration** — fresh live re-scans through the real GitHub-scan
+endpoint (not simulated), server-measured `scan_duration_sec`:
+
+| Repo | Files | Functions | Before | After | Per-file ratio |
+|---|---|---|---|---|---|
+| **curl** (clean comparison — same 200 files, same `master` branch both times) | 200 | 1,896 | 186.1s | **797.5s** | **~4.3x** |
+| zlib (caveated — see below) | 67 (this run; 117 in the original measurement) | 492 | 103.3s (117 files) | 207.6s (67 files) | ~3.5x |
+
+**curl is the clean, controlled comparison**: identical file count (200)
+and branch (`master`) both times, so the ~4.3x per-file slowdown is a
+direct, uncontaminated measurement of the redesign's real cost — not
+inflated or deflated by a differing file set. Its function-to-file ratio
+was 1,896/200 ≈ 9.5; the naive (unbatched, sequential) expectation from
+§4 would be roughly that same ~9.5x, so batching measurably delivered
+**less than half** the naive overhead (4.3x actual vs. ~9.5x naive) —
+confirming real savings, not just the theoretical possibility of them.
+
+**zlib caveat**: the fresh re-scan resolved 67 files on branch `develop`,
+not the 117 files the original whole-file measurement covered (an
+uncontrolled difference, likely default-branch resolution — not pinned
+down further). Its ~3.5x per-file ratio is directionally consistent with
+curl's cleaner ~4.3x but shouldn't be over-weighted given the mismatched
+file set.
+
+**Bottom line, stated plainly**: batching keeps this practical relative to
+the naive alternative (roughly half the overhead, not the full 5-15x),
+but it is **not free** — curl's real scan time went from 186s to 797.5s
+(~13.3 minutes), which is now **past the 10-minute `VITE_SCAN_TIMEOUT_MS`
+stopgap added in Section A**. That stopgap was sized against whole-file
+scan times measured before this redesign; it has not been re-tuned for
+per-function scan times, and this real measurement shows it needs to be —
+flagged here rather than silently left inconsistent with the new reality
+this same session introduced.
+
+**Scope of what was actually re-measured**: 2 of the 6 repos originally
+listed (curl and zlib) were re-scanned fresh this session, not all 6 —
+each real scan takes several minutes to over 13 minutes, and curl's clean,
+controlled result is sufficient to establish the real overhead ratio.
+Reported honestly rather than extrapolating unmeasured numbers for
+mbedTLS, sqlite, busybox, or wolfSSL.
+
+### Follow-up this measurement surfaced (not actioned this session)
+
+`VITE_SCAN_TIMEOUT_MS` (`frontend/.env.example`, currently 600000ms/10min)
+should be reconsidered now that a real 200-file repo measured at 797.5s
+server-side — the client-side timeout needs to account for per-function
+scan times, not the whole-file times it was originally sized against.
+Not changed as part of this implementation session since it's a separate,
+narrowly-scoped follow-up, not part of the per-function redesign itself —
+flagging it here so it isn't lost.
+
