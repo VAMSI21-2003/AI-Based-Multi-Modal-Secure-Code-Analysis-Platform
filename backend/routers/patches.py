@@ -94,6 +94,11 @@ def apply_patch(scan_id: str, payload: ApplyPatchRequest, db: Session = Depends(
         "original_scan_id": record.id,
         "derived_scan_id": derived.id,
         "changes": rewrite["changes"],
-        "original": record_to_dict(record, include_code=False),
-        "derived": record_to_dict(derived, include_code=False),
+        # include_code=True on both -- the before/after comparison (diff +
+        # risk score, docs/APPLY_PATCH_LOOP_DESIGN.md §3) needs both code
+        # strings, and this keeps the response fully self-contained rather
+        # than requiring the frontend to separately trust whatever's
+        # currently loaded in page state to still be the right "original".
+        "original": record_to_dict(record, include_code=True),
+        "derived": record_to_dict(derived, include_code=True),
     }

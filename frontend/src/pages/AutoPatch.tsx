@@ -1,13 +1,15 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { Wrench, CheckCircle2, BookOpen, ArrowDown, Wand2, AlertTriangle } from "lucide-react";
+import { Wrench, CheckCircle2, BookOpen, ArrowDown, Wand2, AlertTriangle, TrendingDown, TrendingUp, Minus } from "lucide-react";
 import PageShell from "../components/PageShell";
 import ChartCard from "../components/ChartCard";
 import { Spinner } from "../components/Loading";
 import ScanPickerEmpty from "../components/ScanPickerEmpty";
 import DiffViewer from "../components/DiffViewer";
+import ProgressBar from "../components/ProgressBar";
 import { VerdictPill } from "../components/RiskBadge";
 import { useActiveScan } from "../hooks/useActiveScan";
+import type { ScanResult } from "../api/client";
 import { getPatches, applyPatch, type PatchCard, type PatchResponse, type ApplyPatchResult, type ApplyPatchBlocked } from "../api/patches";
 
 export default function AutoPatch() {
@@ -186,20 +188,71 @@ function PatchCardView({
         <div className="mt-4 pt-4 border-t border-(--border-hairline) text-xs text-(--status-critical)">{applyError}</div>
       )}
 
-      {appliedResult && (
-        <div className="mt-4 pt-4 border-t border-(--border-hairline)">
-          <div className="flex items-center gap-2 text-xs font-semibold mb-2">
-            <CheckCircle2 size={14} className="text-(--status-good)" /> Applied — new scan created
-          </div>
-          <div className="flex items-center gap-3 text-xs text-(--text-secondary)">
-            <VerdictPill verdict={appliedResult.derived.verdict} />
-            <span>{appliedResult.derived.vuln_probability.toFixed(1)}% vulnerability probability (was {appliedResult.original.vuln_probability.toFixed(1)}%)</span>
-          </div>
-          <Link to={`/auto-patch?scan=${appliedResult.derived_scan_id}`} className="text-[11px] text-(--accent) hover:underline mt-2 inline-block">
-            View the derived scan's own patches →
-          </Link>
-        </div>
-      )}
+      {appliedResult && <BeforeAfterComparison result={appliedResult} />}
     </ChartCard>
+  );
+}
+
+function BeforeAfterComparison({ result }: { result: ApplyPatchResult }) {
+  const { original, derived } = result;
+  const probDelta = derived.vuln_probability - original.vuln_probability;
+  const verdictChanged = original.verdict !== derived.verdict;
+  const improved = probDelta < 0;
+
+  return (
+    <div className="mt-4 pt-4 border-t border-(--border-hairline)">
+      <div className="flex items-center gap-2 text-sm font-semibold mb-3">
+        <CheckCircle2 size={15} className="text-(--status-good)" /> Applied — Before / After
+      </div>
+
+      {/* Re-scan can find new/different issues -- the model's score is not
+          guaranteed to move in the "expected" direction just because the
+          targeted pattern was fixed (see docs/CI_CD.md §4 for a real
+          example). Shown plainly either way, not framed as "success". */}
+      <div className="card p-4 mb-4 flex items-center gap-3">
+        {verdictChanged ? (
+          improved ? <TrendingDown className="text-(--status-good) shrink-0" size={20} /> : <TrendingUp className="text-(--status-warning) shrink-0" size={20} />
+        ) : (
+          <Minus className="text-(--text-muted) shrink-0" size={20} />
+        )}
+        <div>
+          <div className="text-sm font-semibold">
+            {verdictChanged ? `Verdict changed: ${original.verdict} → ${derived.verdict}` : `Verdict unchanged: ${derived.verdict}`}
+          </div>
+          <div className="text-xs text-(--text-muted)">
+            Vulnerability probability {probDelta <= 0 ? "decreased" : "increased"} by {Math.abs(probDelta).toFixed(1)} points
+            ({original.vuln_probability.toFixed(1)}% → {derived.vuln_probability.toFixed(1)}%).
+            {!improved && " The rewrite did not lower the model's score for this function -- reported honestly, not hidden."}
+          </div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+        <ScanScoreCard label="Original" accent="var(--series-5)" result={original} />
+        <ScanScoreCard label="Patched" accent="var(--series-1)" result={derived} />
+      </div>
+
+      <div className="text-xs font-semibold mb-2">Code Diff (whole file)</div>
+      <DiffViewer original={original.code || ""} modified={derived.code || ""} />
+
+      <Link to={`/auto-patch?scan=${result.derived_scan_id}`} className="text-[11px] text-(--accent) hover:underline mt-3 inline-block">
+        View the derived scan's own patches →
+      </Link>
+    </div>
+  );
+}
+
+function ScanScoreCard({ label, accent, result }: { label: string; accent: string; result: ScanResult }) {
+  return (
+    <div className="card p-4">
+      <div className="flex items-center justify-between mb-3">
+        <div className="text-sm font-semibold" style={{ color: accent }}>{label}</div>
+        <VerdictPill verdict={result.verdict} />
+      </div>
+      <div className="space-y-3">
+        <ProgressBar value={result.vuln_probability} color={accent} label="Vulnerability Probability" />
+        <ProgressBar value={result.confidence} color="var(--series-7)" label="Confidence" />
+      </div>
+    </div>
   );
 }
