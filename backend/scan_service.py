@@ -99,6 +99,7 @@ def record_to_dict(r: ScanRecord, include_code: bool = True) -> dict:
         "loc": r.loc,
         "is_pinned": bool(r.is_pinned),
         "tags": [t for t in (r.tags or "").split(",") if t],
+        "derived_from_scan_id": r.derived_from_scan_id,
         "created_at": r.created_at.isoformat() + "Z",
     }
     if include_code:
