@@ -136,6 +136,11 @@ jobs:
       contents: read
       security-events: write
       pull-requests: write
+      # codeql-action/upload-sarif calls the Actions API to correlate the
+      # SARIF file with this workflow run; without this it 403s with
+      # "Resource not accessible by integration" (observed on this repo's
+      # first real PR run, 29905887615).
+      actions: read
     env:
       # Non-blocking by default (see docs/CI_CD.md #5). A pull_request run
       # reads the repo variable SCAN_BLOCKING (Settings -> Secrets and
