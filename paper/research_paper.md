@@ -1155,6 +1155,19 @@ this threshold has since been adopted for the live system's binary verdict,
 while the headline metrics in this paper remain reported at the standard 0.5
 threshold for comparability with the wider literature (Table 5).
 
+**No Authentication in the Reference Implementation:** The web platform
+built around this pipeline (`backend/`, `frontend/`) has no user accounts
+or authentication on any endpoint — a deliberate scope decision for a
+single-operator research/evaluation tool, not an oversight discovered
+late. It is evaluated and intended to be run against one person's own
+code, locally or in a single Docker Compose stack, not as a multi-tenant
+service with untrusted users. A production deployment serving multiple
+users would need authenticated sessions or API keys in front of every
+route, per-user scan history instead of one shared database, and a
+network-exposure posture (CORS, rate limiting) revisited accordingly —
+none of which is in scope for the reference implementation this paper
+evaluates.
+
 ---
 
 ## 9. Conclusion

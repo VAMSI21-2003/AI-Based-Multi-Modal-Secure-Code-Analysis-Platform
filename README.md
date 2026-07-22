@@ -34,6 +34,27 @@ Forest** models. FastAPI backend, React + Vite frontend. See
 
 ---
 
+## Scope: no authentication
+
+This platform has no authentication or user accounts anywhere in the
+FastAPI app — every endpoint is open to anyone who can reach the process.
+This is a **deliberate scope decision**, not an oversight: it's built and
+evaluated as a single-operator academic/research tool (run locally or in
+one Docker Compose stack for one person's own repos), not a multi-tenant
+service, so there is no second user's data to protect it from and no
+session/identity concept the rest of the design assumes exists.
+
+**What a real production deployment would need instead**: authenticated
+sessions (or an API key) in front of every route, per-user scan history
+instead of one shared SQLite database, and the CORS/network-exposure
+posture revisited accordingly (`CORS_ALLOWED_ORIGINS`, see
+[Configuration](#configuration), currently assumes a trusted single-user
+frontend, not arbitrary third-party origins). None of that is implemented
+here, and bolting it on is a real project on its own, not a quick addition
+to this one.
+
+---
+
 ## CI/CD
 
 Every push, pull request, and manual trigger runs the pipeline defined in
