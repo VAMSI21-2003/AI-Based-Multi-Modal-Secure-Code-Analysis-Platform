@@ -1,21 +1,27 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { Wrench, CheckCircle2, BookOpen, ArrowDown } from "lucide-react";
+import { Wrench, CheckCircle2, BookOpen, ArrowDown, Wand2, AlertTriangle } from "lucide-react";
 import PageShell from "../components/PageShell";
 import ChartCard from "../components/ChartCard";
 import { Spinner } from "../components/Loading";
 import ScanPickerEmpty from "../components/ScanPickerEmpty";
 import DiffViewer from "../components/DiffViewer";
+import { VerdictPill } from "../components/RiskBadge";
 import { useActiveScan } from "../hooks/useActiveScan";
-import { getPatches, type PatchCard, type PatchResponse } from "../api/patches";
+import { getPatches, applyPatch, type PatchCard, type PatchResponse, type ApplyPatchResult, type ApplyPatchBlocked } from "../api/patches";
 
 export default function AutoPatch() {
   const { scanId, scan, loading: scanLoading, error } = useActiveScan();
   const [patches, setPatches] = useState<PatchResponse | null>(null);
+  // Applied results, keyed by patch id -- lets multiple cards on the same
+  // page each carry their own independent apply/before-after state.
+  const [applied, setApplied] = useState<Record<string, ApplyPatchResult>>({});
 
   useEffect(() => {
     if (!scanId) return;
     let cancelled = false;
+    setPatches(null);
+    setApplied({});
     getPatches(scanId).then((p) => { if (!cancelled) setPatches(p); });
     return () => { cancelled = true; };
   }, [scanId]);
@@ -44,7 +50,15 @@ export default function AutoPatch() {
             <CheckCircle2 size={15} className="text-(--status-good)" /> Detected in Your Code
           </div>
           <div className="space-y-6">
-            {patches.detected.map((p) => <PatchCardView key={p.id} patch={p} />)}
+            {patches.detected.map((p) => (
+              <PatchCardView
+                key={p.id}
+                scanId={scanId}
+                patch={p}
+                appliedResult={applied[p.id]}
+                onApplied={(result) => setApplied((prev) => ({ ...prev, [p.id]: result }))}
+              />
+            ))}
           </div>
         </div>
       )}
@@ -58,7 +72,7 @@ export default function AutoPatch() {
           shown here as canonical before/after examples for reference.
         </p>
         <div className="space-y-6">
-          {patches.reference.map((p) => <PatchCardView key={p.id} patch={p} />)}
+          {patches.reference.map((p) => <PatchCardView key={p.id} scanId={scanId} patch={p} />)}
         </div>
       </div>
 
@@ -69,7 +83,47 @@ export default function AutoPatch() {
   );
 }
 
-function PatchCardView({ patch }: { patch: PatchCard }) {
+function PatchCardView({
+  scanId, patch, appliedResult, onApplied,
+}: {
+  scanId: string;
+  patch: PatchCard;
+  appliedResult?: ApplyPatchResult;
+  onApplied?: (result: ApplyPatchResult) => void;
+}) {
+  const [applying, setApplying] = useState(false);
+  const [blocked, setBlocked] = useState<ApplyPatchBlocked | null>(null);
+  const [applyError, setApplyError] = useState<string | null>(null);
+
+  // Per the design (docs/APPLY_PATCH_LOOP_DESIGN.md §2): only a detected
+  // (not reference) card with a known, real destination size offers apply
+  // at all -- a placeholder fix is not valid, compilable C to feed back
+  // through the model. The backend re-validates this itself against the
+  // WHOLE file's rewrite (not just this one card's line), so a card that
+  // looks safe here can still come back blocked if a DIFFERENT occurrence
+  // elsewhere in the same file is unknown -- handled honestly below via
+  // the `blocked` state, not hidden.
+  const canApply = patch.detected && patch.size_known;
+
+  const handleApply = async () => {
+    setApplying(true);
+    setBlocked(null);
+    setApplyError(null);
+    try {
+      const result = await applyPatch(scanId, patch.id);
+      onApplied?.(result);
+    } catch (e: any) {
+      const detail = e?.response?.data?.detail;
+      if (detail && typeof detail === "object" && detail.blocked) {
+        setBlocked(detail as ApplyPatchBlocked);
+      } else {
+        setApplyError(typeof detail === "string" ? detail : e.message || "Failed to apply patch");
+      }
+    } finally {
+      setApplying(false);
+    }
+  };
+
   return (
     <ChartCard
       title={patch.title}
@@ -87,6 +141,7 @@ function PatchCardView({ patch }: { patch: PatchCard }) {
         <div className="text-[11px] text-(--status-warning) bg-(--status-warning)/10 rounded-lg p-2 mb-3">
           This destination's real buffer capacity could not be determined from the scanned code (likely a pointer parameter,
           not a stack array) — the fix below uses a placeholder, not a fabricated size. Fill in the real capacity before using it.
+          Apply &amp; Re-scan is unavailable for this fix.
         </div>
       )}
       <DiffViewer original={patch.original_code} modified={patch.fixed_code} />
@@ -98,6 +153,53 @@ function PatchCardView({ patch }: { patch: PatchCard }) {
           <span className="font-semibold text-(--status-good) flex items-center gap-1"><ArrowDown size={11} /> Why it's safer: </span>{patch.why_safer}
         </div>
       </div>
+
+      {canApply && !appliedResult && (
+        <div className="mt-4 pt-4 border-t border-(--border-hairline)">
+          <button
+            onClick={handleApply}
+            disabled={applying}
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-(--accent) text-white text-xs font-semibold hover:brightness-110 transition disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            <Wand2 size={13} /> {applying ? "Applying & re-scanning..." : "Apply & Re-scan"}
+          </button>
+          <div className="text-[11px] text-(--text-muted) mt-2">
+            Creates a new, separate scan from the rewritten code and re-runs real inference on it — the original scan is never modified.
+          </div>
+        </div>
+      )}
+
+      {blocked && (
+        <div className="mt-4 pt-4 border-t border-(--border-hairline)">
+          <div className="text-[11px] text-(--status-warning) bg-(--status-warning)/10 rounded-lg p-3 flex gap-2">
+            <AlertTriangle size={14} className="shrink-0 mt-0.5" />
+            <div>
+              <div className="font-semibold mb-1">Apply blocked — not a real fix yet</div>
+              <div>{blocked.reason}</div>
+              <div className="mt-1 text-(--text-muted)">{blocked.note}</div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {applyError && (
+        <div className="mt-4 pt-4 border-t border-(--border-hairline) text-xs text-(--status-critical)">{applyError}</div>
+      )}
+
+      {appliedResult && (
+        <div className="mt-4 pt-4 border-t border-(--border-hairline)">
+          <div className="flex items-center gap-2 text-xs font-semibold mb-2">
+            <CheckCircle2 size={14} className="text-(--status-good)" /> Applied — new scan created
+          </div>
+          <div className="flex items-center gap-3 text-xs text-(--text-secondary)">
+            <VerdictPill verdict={appliedResult.derived.verdict} />
+            <span>{appliedResult.derived.vuln_probability.toFixed(1)}% vulnerability probability (was {appliedResult.original.vuln_probability.toFixed(1)}%)</span>
+          </div>
+          <Link to={`/auto-patch?scan=${appliedResult.derived_scan_id}`} className="text-[11px] text-(--accent) hover:underline mt-2 inline-block">
+            View the derived scan's own patches →
+          </Link>
+        </div>
+      )}
     </ChartCard>
   );
 }

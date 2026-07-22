@@ -45,6 +45,7 @@ export interface ScanResult {
   loc: number;
   is_pinned: boolean;
   tags: string[];
+  derived_from_scan_id: string | null;
   created_at: string;
   code?: string;
   validation_message?: string;
