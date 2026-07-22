@@ -19,14 +19,21 @@
 # this distinction exists and matters -- a "safer" patch built on a
 # fabricated size is not actually safe.
 #
-# Purely additive: does not modify recommendations.py or the existing
-# suggest_secure_rewrite() used by the Recommendations page (which applies
-# the same patch_safety.py logic separately, on its own whole-code rewrite).
+# Shares its strcpy/strcat/gets/sprintf detection+fix rules with
+# recommendations.py's suggest_secure_rewrite() via rewrite_rules.py, rather
+# than maintaining a second, independent copy of those regexes (previously
+# this file also lacked strcat coverage that recommendations.py had --
+# importing the same shared list closes that gap). scanf (computes a
+# numeric field width rather than substituting a snippet) and the
+# free/malloc-multiply/malloc-nullcheck detectors (presence/absence
+# heuristics with a fixed insertion, not a pattern substitution) don't fit
+# that shared shape and remain their own dedicated logic below.
 # =============================================================================
 
 import re
 
 import patch_safety
+from rewrite_rules import REWRITE_RULES
 
 MALLOC_FAMILY = re.compile(r"\b(\w+)\s*=\s*(?:\([^)]*\*\s*\)\s*)?(malloc|calloc|realloc)\s*\(")
 NULLCHECK_NEARBY = re.compile(r"==\s*NULL|!=\s*NULL|if\s*\(\s*!\s*\w+\s*\)")
@@ -39,10 +46,6 @@ MALLOC_MULTIPLY = re.compile(r"(\w+)\s*=\s*(?:\([^)]*\*\s*\)\s*)?malloc\s*\(\s*(
 # honestly-labeled card rather than guessing.
 SCANF_ONE_ARG = re.compile(r'\bscanf\s*\(\s*"([^"]*)"\s*,\s*([A-Za-z_]\w*)\s*\)')
 SCANF_ANY = re.compile(r'\bscanf\s*\(\s*"[^"]*%s')
-
-STRCPY = re.compile(r"\bstrcpy\s*\(\s*([^,]+?)\s*,\s*([^)]+?)\s*\)")
-GETS = re.compile(r"\bgets\s*\(\s*([^)]+?)\s*\)")
-SPRINTF = re.compile(r"\bsprintf\s*\(\s*([^,]+?)\s*,")
 
 
 def _card(id_, category, cwe, title, line, original, fixed, explanation, why_safer, detected, size_known=True):
@@ -58,54 +61,18 @@ def _scan_line_patterns(code: str, lines):
     cards = []
     n = 0
     for i, line in enumerate(lines):
-        m = STRCPY.search(line)
-        if m:
+        for rule in REWRITE_RULES:
+            m = rule.pattern.search(line)
+            if not m:
+                continue
             n += 1
-            dest, src = m.group(1), m.group(2)
-            if patch_safety.destination_capacity_is_known(code, dest):
-                fixed = STRCPY.sub(lambda mm: f"strncpy({mm.group(1)}, {mm.group(2)}, sizeof({mm.group(1)}) - 1); {mm.group(1)}[sizeof({mm.group(1)}) - 1] = '\\0'", line)
-                cards.append(_card(f"strcpy-{n}", "strcpy", "CWE-120", "Unbounded strcpy()", i + 1, line.strip(), fixed.strip(),
-                                    "strcpy() copies until it hits a NUL byte with no regard for the destination buffer's size.",
-                                    "strncpy() caps the copy at the destination size, and the explicit NUL write guarantees termination even if the source was truncated.",
-                                    True, size_known=True))
-            else:
-                fixed = f"strncpy({dest}, {src}, dest_size - 1); {dest}[dest_size - 1] = '\\0';  /* TODO: set dest_size to {dest}'s real capacity */"
-                cards.append(_card(f"strcpy-{n}", "strcpy", "CWE-120", "Unbounded strcpy()", i + 1, line.strip(), fixed,
-                                    "strcpy() copies until it hits a NUL byte with no regard for the destination buffer's size.",
-                                    patch_safety.UNKNOWN_CAPACITY_NOTE,
-                                    True, size_known=False))
-        m = GETS.search(line)
-        if m:
-            n += 1
-            dest = m.group(1)
-            if patch_safety.destination_capacity_is_known(code, dest):
-                fixed = GETS.sub(lambda mm: f"fgets({mm.group(1)}, sizeof({mm.group(1)}), stdin)", line)
-                cards.append(_card(f"gets-{n}", "gets", "CWE-242", "Unsafe gets()", i + 1, line.strip(), fixed.strip(),
-                                    "gets() cannot be told how large the destination buffer is -- any input longer than the buffer overflows it.",
-                                    "fgets() takes an explicit size argument, so it can never write past the end of the buffer.",
-                                    True, size_known=True))
-            else:
-                fixed = f"fgets({dest}, dest_size, stdin);  /* TODO: set dest_size to {dest}'s real capacity */"
-                cards.append(_card(f"gets-{n}", "gets", "CWE-242", "Unsafe gets()", i + 1, line.strip(), fixed,
-                                    "gets() cannot be told how large the destination buffer is -- any input longer than the buffer overflows it.",
-                                    patch_safety.UNKNOWN_CAPACITY_NOTE,
-                                    True, size_known=False))
-        m = SPRINTF.search(line)
-        if m:
-            n += 1
-            dest = m.group(1)
-            if patch_safety.destination_capacity_is_known(code, dest):
-                fixed = SPRINTF.sub(lambda mm: f"snprintf({mm.group(1)}, sizeof({mm.group(1)}),", line)
-                cards.append(_card(f"sprintf-{n}", "sprintf", "CWE-120", "Unbounded sprintf()", i + 1, line.strip(), fixed.strip(),
-                                    "sprintf() has no length limit -- a long enough formatted result overflows the destination buffer.",
-                                    "snprintf() truncates safely at the given size instead of writing past the buffer.",
-                                    True, size_known=True))
-            else:
-                fixed = SPRINTF.sub(lambda mm: f"snprintf({mm.group(1)}, dest_size,  /* TODO: set dest_size to {mm.group(1)}'s real capacity */", line)
-                cards.append(_card(f"sprintf-{n}", "sprintf", "CWE-120", "Unbounded sprintf()", i + 1, line.strip(), fixed.strip(),
-                                    "sprintf() has no length limit -- a long enough formatted result overflows the destination buffer.",
-                                    patch_safety.UNKNOWN_CAPACITY_NOTE,
-                                    True, size_known=False))
+            dest = m.group(rule.dest_group)
+            known = patch_safety.destination_capacity_is_known(code, dest)
+            replacer = rule.safe_replacer if known else rule.unsafe_replacer
+            fixed = rule.pattern.sub(replacer, line).strip()
+            why_safer = rule.why_safer_known if known else patch_safety.UNKNOWN_CAPACITY_NOTE
+            cards.append(_card(f"{rule.id}-{n}", rule.id, rule.cwe, rule.title, i + 1, line.strip(), fixed,
+                                rule.explanation, why_safer, True, size_known=known))
 
         scanf_one = SCANF_ONE_ARG.search(line)
         if scanf_one:

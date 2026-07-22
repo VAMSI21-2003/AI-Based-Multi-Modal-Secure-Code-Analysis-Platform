@@ -8,44 +8,16 @@
 # output, not a modification of the model itself.
 # =============================================================================
 
-import re
-
 import patch_safety
+from rewrite_rules import REWRITE_RULES
 
-# Each entry: (pattern, dest_group_index, safe_replacer, unsafe_replacer, description).
-# `safe_replacer`/`unsafe_replacer` both take the match object; `unsafe_replacer`
-# is used instead of a fabricated sizeof(dest) whenever patch_safety determines
-# the destination's capacity is NOT statically knowable from the code being
-# rewritten (see patch_safety.py for why this distinction is required).
+# (pattern, dest_group_index, safe_replacer, unsafe_replacer, description) --
+# derived from the single shared rule list in rewrite_rules.py (also used by
+# auto_patch.py's per-line "detected" cards) rather than a second,
+# independently-maintained copy of the same regexes.
 AUTO_FIXES = [
-    (
-        re.compile(r"\bstrcpy\s*\(\s*([^,]+?)\s*,\s*([^)]+?)\s*\)"),
-        1,
-        lambda m: f"strncpy({m.group(1)}, {m.group(2)}, sizeof({m.group(1)}) - 1); {m.group(1)}[sizeof({m.group(1)}) - 1] = '\\0'",
-        lambda m: f"strncpy({m.group(1)}, {m.group(2)}, dest_size - 1); {m.group(1)}[dest_size - 1] = '\\0';  /* TODO: set dest_size to {m.group(1)}'s real capacity */",
-        "Replaced strcpy() with a bounds-checked strncpy() + explicit NUL termination.",
-    ),
-    (
-        re.compile(r"\bstrcat\s*\(\s*([^,]+?)\s*,\s*([^)]+?)\s*\)"),
-        1,
-        lambda m: f"strncat({m.group(1)}, {m.group(2)}, sizeof({m.group(1)}) - strlen({m.group(1)}) - 1)",
-        lambda m: f"strncat({m.group(1)}, {m.group(2)}, dest_size - strlen({m.group(1)}) - 1)  /* TODO: set dest_size to {m.group(1)}'s real capacity */",
-        "Replaced strcat() with a bounds-checked strncat().",
-    ),
-    (
-        re.compile(r"\bgets\s*\(\s*([^)]+?)\s*\)"),
-        1,
-        lambda m: f"fgets({m.group(1)}, sizeof({m.group(1)}), stdin)",
-        lambda m: f"fgets({m.group(1)}, dest_size, stdin)  /* TODO: set dest_size to {m.group(1)}'s real capacity */",
-        "Replaced gets() with fgets() (bounded read).",
-    ),
-    (
-        re.compile(r"\bsprintf\s*\(\s*([^,]+?)\s*,"),
-        1,
-        lambda m: f"snprintf({m.group(1)}, sizeof({m.group(1)}),",
-        lambda m: f"snprintf({m.group(1)}, dest_size,  /* TODO: set dest_size to {m.group(1)}'s real capacity */",
-        "Replaced sprintf() with snprintf() (bounded formatting).",
-    ),
+    (r.pattern, r.dest_group, r.safe_replacer, r.unsafe_replacer, r.description)
+    for r in REWRITE_RULES
 ]
 
 BEST_PRACTICES = {

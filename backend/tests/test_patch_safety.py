@@ -179,3 +179,40 @@ def test_suggest_secure_rewrite_pointer_param_flags_manual_sizing():
     assert result["requires_manual_sizing"] is True
     assert "dest_size" in result["rewritten_code"]
     assert "sizeof(dest)" not in result["rewritten_code"]
+
+
+# ── rewrite_rules.py consolidation: both engines share one rule list ───────
+
+def test_auto_patch_now_detects_strcat_closing_the_prior_coverage_gap():
+    # Before rewrite_rules.py consolidated the two engines' regex/replacer
+    # definitions, auto_patch.py had no strcat rule at all even though
+    # recommendations.py did -- the dedicated AutoPatch page would show
+    # nothing for code the Recommendations/CodeDiff pages already fixed.
+    code = """
+void append(char *dest, const char *src) {
+    strcat(dest, src);
+}
+"""
+    result = auto_patch.generate_patches(code)
+    strcat_cards = [c for c in result["detected"] if c["category"] == "strcat"]
+    assert len(strcat_cards) == 1
+    assert strcat_cards[0]["size_known"] is False
+    assert "strncat(" in strcat_cards[0]["fixed_code"]
+    assert "dest_size" in strcat_cards[0]["fixed_code"]
+
+
+def test_auto_patch_and_recommendations_share_the_same_rule_objects():
+    # Not just equivalent behavior -- literally the same RewriteRule
+    # instances, so the two engines' strcpy/strcat/gets/sprintf handling
+    # cannot silently drift apart again in the future.
+    from rewrite_rules import REWRITE_RULES
+
+    rec_patterns = {pattern for pattern, *_ in recommendations.AUTO_FIXES}
+    rule_patterns = {r.pattern for r in REWRITE_RULES}
+    assert rec_patterns == rule_patterns
+
+    strcpy_rule = next(r for r in REWRITE_RULES if r.id == "strcpy")
+    result = auto_patch.generate_patches(STACK_ARRAY_CODE)
+    strcpy_card = next(c for c in result["detected"] if c["category"] == "strcpy")
+    assert strcpy_card["cwe"] == strcpy_rule.cwe
+    assert strcpy_card["title"] == strcpy_rule.title
