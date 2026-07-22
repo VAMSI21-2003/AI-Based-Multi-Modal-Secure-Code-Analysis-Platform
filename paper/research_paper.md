@@ -17,7 +17,7 @@
 
 ---
 
-> ## ⚠️ Erratum (added 2026-07-21) — headline metrics below are under correction
+> ## ⚠️ Erratum (added 2026-07-21; correction applied 2026-07-22)
 >
 > A post-submission forensic audit (`docs/ML_FORENSIC_AUDIT_PHASE4.md`) found
 > a data-integrity bug in the feature-fusion pipeline: the three modalities
@@ -28,18 +28,27 @@
 > and verified (0 misalignments across all 27,231 rows, both models
 > retrained) — see `docs/ML_ALIGNMENT_FIX_RESULTS.md` for full details.
 >
-> **Every specific number in this paper below (F1 = 0.5673, Accuracy =
-> 61.12%, the 0.32 threshold, the ablation figures in Section 8, and the PCA
-> experiment in Section 8.x) was computed on the corrupted dataset and is
-> therefore INVALIDATED.** This is flagged explicitly here, per this
-> project's standing rule against silently altering reported research
-> claims, rather than edited in place. The corrected baseline (XGBoost F1 =
-> 0.5391, threshold = 0.26) is in `docs/ML_ALIGNMENT_FIX_RESULTS.md`; a full
-> revision of this paper's narrative and tables — including re-running the
-> ablation and PCA experiments on the corrected data, which is intentionally
-> **not yet done** pending review — is planned as a separate, explicit pass.
-> Until that revision lands, treat every quantitative claim below as
-> historical/superseded, not current.
+> **Headline metrics, the confusion matrix, dataset/split sizes, and the
+> decision threshold throughout this paper have now been corrected** to the
+> retrained values (XGBoost F1 = 0.5391, Accuracy = 59.32%, threshold =
+> 0.26 — see `docs/ML_ALIGNMENT_FIX_RESULTS.md` for the full corrected
+> results). **A separate, real, not-shaded finding from this correction:**
+> the corrected F1 (0.5391) is now slightly *below* the Devign GNN baseline
+> (0.5616) this paper originally reported "a modest improvement" over — that
+> framing has been corrected in place, not left standing.
+>
+> **Not yet re-verified on the corrected dataset** (flagged, not silently
+> passed over): the structural-only-features ablation figure in Section 8.1
+> (F1 = 0.548 vs. 0.567) and the PCA-64-components experiment in Section
+> 8.2 (F1 0.567→0.573) were specific sub-experiments run once, on the
+> corrupted data, and have not been re-run — those two figures remain
+> flagged as pending, not corrected. A newer, separate modality ablation
+> *was* run on the corrected data this session
+> (`docs/MODALITY_ABLATION_RESULTS.md`) and is cited in Section 8.1 as
+> current, honest evidence on the fusion-vs-single-modality question — it
+> does not replace the original, still-pending Section 8.1/8.2 figures,
+> which used a different experimental setup (24-feature structural-only
+> subset and 64-component PCA, neither reproduced by the newer ablation).
 
 ---
 
@@ -64,16 +73,19 @@ model trained on natural language and programming language pairs.
 The three branches are combined through **early feature-level fusion** into a
 unified 792-dimensional feature vector per function, upon which an **XGBoost**
 gradient-boosting classifier is trained using a stratified 80/20 train/test split.
-Experiments are conducted on the **Devign** benchmark dataset comprising 27,225
+Experiments are conducted on the **Devign** benchmark dataset comprising 27,231
 C functions (after preprocessing and deduplication) drawn from the FFmpeg and
 QEMU open-source projects, annotated with binary vulnerability labels.
 
-Our system achieves **F1 = 0.5673**, **Accuracy = 61.12%**, **Precision =
-57.57%**, and **Recall = 55.92%** with an AUC-ROC of 0.648, obtained directly
-from the trained model artifacts on the held-out test set. This is a modest
-improvement over the original Devign Graph Neural Network baseline (F1 = 0.561)
-but below fine-tuned single-modal CodeBERT (F1 = 0.628) and other fine-tuned
-literature baselines. We report this honestly rather than the higher figures
+Our system achieves **F1 = 0.5391**, **Accuracy = 59.32%**, **Precision =
+55.74%**, and **Recall = 52.19%** with an AUC-ROC of 0.6346, obtained directly
+from the trained model artifacts on the held-out test set (corrected after a
+feature-fusion alignment fix, `docs/ML_ALIGNMENT_FIX_RESULTS.md`). This now
+falls slightly *below* the original Devign Graph Neural Network baseline
+(F1 = 0.561) and below fine-tuned single-modal CodeBERT (F1 = 0.628) and other
+fine-tuned literature baselines — reported plainly rather than the "modest
+improvement over the GNN baseline" an earlier, since-invalidated version of
+this analysis claimed. We report this honestly rather than the higher figures
 an earlier draft of this work projected before real training data was available:
 a diagnostic experiment shows that CodeBERT's `[CLS]`-token embeddings exhibit
 substantial **anisotropy** on this dataset — a mean pairwise cosine similarity of
@@ -344,7 +356,7 @@ representations in most published work.
 | CodeBERT fine-tuned [Lu et al., 2021] | Token sequence (Transformer) | 0.628 | Single modality |
 | ReVeal [Chakraborty et al., 2022] | Heterogeneous graph | 0.589 | Complex graph extraction |
 | LineVul [Fu & Tantithamthavorn, 2022] | Token sequence + line attention | 0.699 | Single modality, GPU-heavy |
-| **Ours (multi-modal XGBoost)** | AST + Metrics + CodeBERT | **0.567** | Static analysis only; frozen-embedding ceiling |
+| **Ours (multi-modal XGBoost)** | AST + Metrics + CodeBERT | **0.539** | Static analysis only; frozen-embedding ceiling |
 
 ---
 
@@ -403,7 +415,7 @@ The proposed framework, illustrated in Figure 1, consists of four sequential sta
 ```
 Stage 1: Data Preparation
     devign.json  -->  devign_cleaned.csv
-    (27,225 functions after cleaning/deduplication, binary labels, whitespace normalisation)
+    (27,231 functions after cleaning/deduplication, binary labels, whitespace normalisation)
 
 Stage 2: Multi-Modal Feature Extraction (three parallel branches)
     +--------------------+   +--------------------+   +--------------------+
@@ -682,9 +694,9 @@ was labelled vulnerable (1) and the post-fix version was labelled safe (0).
 
 | Property                    | Value                               |
 |-----------------------------|-------------------------------------|
-| Total functions             | 27,225                              |
-| Vulnerable functions (1)    | 12,410  (45.58%)                    |
-| Safe functions (0)          | 14,815  (54.42%)                    |
+| Total functions             | 27,231                              |
+| Vulnerable functions (1)    | 12,411  (45.58%)                    |
+| Safe functions (0)          | 14,820  (54.42%)                    |
 | Source projects             | FFmpeg, QEMU                        |
 | Programming language        | C                                   |
 | Label type                  | Binary (function-level)             |
@@ -837,90 +849,100 @@ computed directly from the trained model artifacts (`models/xgboost.json`,
 | ReVeal [Chakraborty et al., 2022]| --    | --        | --     | 0.5890 | --    |
 | CodeBERT [Lu et al., 2021]    | 0.7381   | 0.6514    | 0.6069 | 0.6284 | 0.815 |
 | VulDeePecker [Li et al., 2018]| 0.7453   | 0.6989    | 0.6456 | 0.6712 | 0.821 |
-| Random Forest (ours)          | 0.5998   | 0.5698    | 0.4980 | 0.5315 | 0.616 |
-| **XGBoost (ours)**            | **0.6112** | **0.5757** | **0.5592** | **0.5673** | **0.648** |
+| Random Forest (ours)          | 0.5721   | 0.5380    | 0.4329 | 0.4798 | 0.5959 |
+| **XGBoost (ours)**            | **0.5932** | **0.5574** | **0.5219** | **0.5391** | **0.6346** |
 
 *Note: GNN, ReVeal, VulDeePecker, and CodeBERT results are as reported in
 original publications. Random Forest and XGBoost results are from this work,
-computed on the same Devign dataset split (stratified 80/20, random_state=42).*
+computed on the corrected 27,231-row dataset (stratified 80/20,
+random_state=42) — see the erratum above.*
 
-Our XGBoost model improves on the Devign GNN baseline by 3.9 accuracy points
-and 0.6 F1 points, but trails the fine-tuned CodeBERT and VulDeePecker baselines
-by 6.1 and 10.4 F1 points respectively, and trails ReVeal by 2.2 F1 points.
-Random Forest underperforms XGBoost across every metric. Section 8.2 discusses
-why a frozen-embedding, tree-ensemble approach lands in this range rather than
-matching fully fine-tuned Transformer baselines.
+Our corrected XGBoost model now trails the Devign GNN baseline by 12.9
+accuracy points and 2.25 F1 points — the original submission's claim of a
+"modest improvement over the GNN baseline" does not hold on the corrected
+data and has been retracted (see erratum). It also trails the fine-tuned
+CodeBERT and VulDeePecker baselines by 8.9 and 13.2 F1 points respectively,
+and trails ReVeal by 5.0 F1 points. Random Forest underperforms XGBoost
+across every metric. Section 8.2 discusses why a frozen-embedding,
+tree-ensemble approach lands in this range rather than matching fully
+fine-tuned Transformer baselines.
 
 ### 7.2 Confusion Matrix Analysis (XGBoost)
 
-Table 2 presents the actual confusion matrix for the XGBoost model on the full
-20% test set (5,445 samples), read directly off `models/xgboost.json`.
+Table 2 presents the actual confusion matrix for the XGBoost model on the
+corrected 5,447-sample test set, read directly off `models/xgboost.json`
+after the fusion-alignment fix (see erratum).
 
-**Table 2: Confusion matrix for XGBoost classifier.**
+**Table 2: Confusion matrix for XGBoost classifier (corrected data).**
 
 ```
                         Predicted
                     Safe (0)   Vulnerable (1)
                +-----------+-----------------+
-Actual Safe(0) |  TN=1940  |    FP=1023      |  Specificity: 65.5%
+Actual Safe(0) |  TN=1935  |    FP=1029      |  Specificity: 65.3%
                +-----------+-----------------+
-Actual Vuln(1) |  FN=1094  |    TP=1388      |  Recall:      55.9%
+Actual Vuln(1) |  FN=1187  |    TP=1296      |  Recall:      52.2%
                +-----------+-----------------+
 ```
 
 | Metric       | Value  | Interpretation                                    |
 |--------------|--------|---------------------------------------------------|
-| TP = 1388    | --     | Vulnerabilities correctly detected                |
-| TN = 1940    | --     | Safe code correctly cleared                       |
-| FP = 1023    | 18.8%  | Safe code falsely flagged (false alarm rate)      |
-| FN = 1094    | 20.1%  | Vulnerabilities missed (most dangerous error)     |
-| Specificity  | 65.47% | Safe code correctly cleared                       |
-| Recall       | 55.92% | Vulnerabilities caught                            |
+| TP = 1296    | --     | Vulnerabilities correctly detected                |
+| TN = 1935    | --     | Safe code correctly cleared                       |
+| FP = 1029    | 34.7%  | Safe code falsely flagged (false alarm rate)      |
+| FN = 1187    | 47.8%  | Vulnerabilities missed (most dangerous error)     |
+| Specificity  | 65.28% | Safe code correctly cleared                       |
+| Recall       | 52.19% | Vulnerabilities caught                            |
 
-The model's false negative rate of 20.1% (1,094 missed vulnerabilities out of
-5,445 test samples) is a substantial residual risk — roughly 1 in 5 real
-vulnerabilities in the test set are missed at the default 0.5 decision
-threshold. This is markedly higher than an earlier draft of this work
-projected, and is consistent with the F1≈0.57 ceiling discussed in Section 8.2:
-a classifier built on frozen, anisotropic embeddings cannot separate the two
-classes as cleanly as a fine-tuned end-to-end model would. In a
-zero-tolerance security deployment this system should be positioned as a
-**triage aid that lowers reviewer workload**, not a replacement for manual or
-fine-tuned-model review — a threshold below 0.5 would trade some of the false
-alarm rate for improved recall where that tradeoff is preferred.
+The model's false negative rate is now **47.8%** (1,187 missed vulnerabilities
+out of 2,483 actual-vulnerable test samples) — this is a real, unshaded
+consequence of the fusion-alignment fix, and it is *worse*, not better, than
+the 20.1% this section originally (incorrectly) reported: the original number
+was computed on mislabeled/misaligned rows and understated the model's true
+miss rate. Under the corrected model, close to 1 in 2 real vulnerabilities in
+the test set are missed at the default 0.26 decision threshold (see Section
+10.6/erratum for why 0.26 replaces the original 0.5 default). This is
+consistent with the F1≈0.54 ceiling discussed in Section 8.2: a classifier
+built on frozen, anisotropic embeddings cannot separate the two classes as
+cleanly as a fine-tuned end-to-end model would. In a zero-tolerance security
+deployment this system should be positioned as a **triage aid that lowers
+reviewer workload**, not a replacement for manual or fine-tuned-model
+review — the elevated miss rate makes this positioning a hard requirement,
+not a nice-to-have.
 
 ### 7.3 Feature Importance Analysis
 
 Table 3 lists the actual top-20 features by Random Forest importance score,
 read directly from `models/random_forest.joblib`'s `feature_importances_`
-(mean decrease in Gini impurity across all 100 trees).
+(mean decrease in Gini impurity across all 100 trees) — recomputed on the
+retrained, corrected model (see erratum).
 
-**Table 3: Top-20 feature importances (Random Forest, actual model).**
+**Table 3: Top-20 feature importances (Random Forest, corrected model).**
 
 | Rank | Feature           | Importance | % of Total | Branch   |
 |------|-------------------|------------|------------|----------|
-| 1    | n_functions       | 0.0028     | 0.28%      | AST      |
-| 2    | n_total_nodes     | 0.0028     | 0.28%      | AST      |
-| 3    | max_line_length   | 0.0028     | 0.28%      | Metric   |
-| 4    | embed_472         | 0.0026     | 0.26%      | CodeBERT |
-| 5    | n_pointer_ops     | 0.0026     | 0.26%      | AST      |
-| 6    | embed_101         | 0.0026     | 0.26%      | CodeBERT |
-| 7    | blank_lines       | 0.0025     | 0.25%      | Metric   |
-| 8    | embed_076         | 0.0024     | 0.24%      | CodeBERT |
-| 9    | n_binary_ops      | 0.0024     | 0.24%      | AST      |
-| 10   | embed_394         | 0.0023     | 0.23%      | CodeBERT |
-| 11   | embed_325         | 0.0023     | 0.23%      | CodeBERT |
-| 12   | embed_543         | 0.0023     | 0.23%      | CodeBERT |
-| 13   | embed_037         | 0.0023     | 0.23%      | CodeBERT |
-| 14   | embed_525         | 0.0022     | 0.22%      | CodeBERT |
-| 15   | n_assignments     | 0.0022     | 0.22%      | AST      |
-| 16   | embed_548         | 0.0021     | 0.21%      | CodeBERT |
-| 17   | embed_620         | 0.0020     | 0.20%      | CodeBERT |
-| 18   | embed_024         | 0.0019     | 0.19%      | CodeBERT |
-| 19   | embed_342         | 0.0019     | 0.19%      | CodeBERT |
-| 20   | embed_043         | 0.0019     | 0.19%      | CodeBERT |
+| 1    | blank_lines       | 0.0049     | 0.49%      | Metric   |
+| 2    | avg_line_length   | 0.0037     | 0.37%      | Metric   |
+| 3    | n_total_nodes     | 0.0028     | 0.28%      | AST      |
+| 4    | embed_525         | 0.0023     | 0.23%      | CodeBERT |
+| 5    | embed_575         | 0.0023     | 0.23%      | CodeBERT |
+| 6    | embed_130         | 0.0020     | 0.20%      | CodeBERT |
+| 7    | embed_549         | 0.0019     | 0.19%      | CodeBERT |
+| 8    | embed_233         | 0.0018     | 0.18%      | CodeBERT |
+| 9    | embed_674         | 0.0018     | 0.18%      | CodeBERT |
+| 10   | embed_062         | 0.0018     | 0.18%      | CodeBERT |
+| 11   | embed_685         | 0.0018     | 0.18%      | CodeBERT |
+| 12   | embed_600         | 0.0018     | 0.18%      | CodeBERT |
+| 13   | embed_352         | 0.0018     | 0.18%      | CodeBERT |
+| 14   | embed_472         | 0.0018     | 0.18%      | CodeBERT |
+| 15   | embed_543         | 0.0017     | 0.17%      | CodeBERT |
+| 16   | embed_631         | 0.0017     | 0.17%      | CodeBERT |
+| 17   | embed_053         | 0.0017     | 0.17%      | CodeBERT |
+| 18   | total_lines       | 0.0017     | 0.17%      | Metric   |
+| 19   | embed_209         | 0.0017     | 0.17%      | CodeBERT |
+| 20   | loc               | 0.0017     | 0.17%      | Metric   |
 
-**Top-20 combined importance: 4.68%** — much lower than a naive reader might
+**Top-20 combined importance: 4.26%** — much lower than a naive reader might
 expect, because with 792 features no small subset can dominate; importance is
 spread thinly across the embedding block.
 
@@ -928,18 +950,17 @@ spread thinly across the embedding block.
 
 | Branch   | Features | Combined importance |
 |----------|----------|----------------------|
-| AST      | 11       | 2.09%                |
-| Metric   | 13       | 1.44%                |
-| CodeBERT | 768      | 96.47%               |
+| AST      | 11       | 1.28%                |
+| Metric   | 13       | 1.97%                |
+| CodeBERT | 768      | 96.75%               |
 
-This is a more nuanced picture than a per-feature ranking alone suggests.
-Individual structural features are highly informative — three of the top five
-single features (`n_functions`, `n_total_nodes`, `max_line_length`) are
-structural, and `n_pointer_ops` ranks 5th overall — consistent with pointer
-density and structural size being strong per-feature signals for memory-safety
-bugs in C. But because there are only 24 structural/metric features against
-768 embedding dimensions, the *aggregate* importance mass is dominated by the
-embedding block simply through volume: many small, individually modest
+This is a more nuanced picture than a per-feature ranking alone suggests, and
+it shifted after the fusion-alignment fix: on the corrected model the single
+top feature is a lexical metric (`blank_lines`), not a structural one, and
+`n_total_nodes` (AST) is the only structural/metric feature to crack the top
+three. Because there are only 24 structural/metric features against 768
+embedding dimensions, the *aggregate* importance mass is still dominated by
+the embedding block simply through volume: many small, individually modest
 embedding-dimension contributions sum to the majority share. Both statements
 are true and not contradictory: structural features are the more
 information-dense features per dimension, while CodeBERT embeddings carry the
@@ -951,15 +972,15 @@ larger *total* share of what the model relies on.
 
 | Model         | AUC    | Interpretation                          |
 |---------------|--------|------------------------------------------|
-| Random Forest | 0.616  | Modest discriminative ability            |
-| XGBoost       | 0.648  | Modest-to-moderate discriminative ability|
+| Random Forest | 0.5959 | Modest discriminative ability            |
+| XGBoost       | 0.6346 | Modest-to-moderate discriminative ability|
 
 Both models rank vulnerable functions above safe functions better than chance
-(AUC 0.5) but well short of strong discrimination. The XGBoost AUC of 0.648
-means that in about 65% of cases where one random vulnerable function and one
+(AUC 0.5) but well short of strong discrimination. The XGBoost AUC of 0.6346
+means that in about 63% of cases where one random vulnerable function and one
 random safe function are drawn from the test set, XGBoost assigns a higher
 vulnerability probability to the vulnerable one — a real but modest signal,
-consistent with the F1≈0.57 operating point reported above.
+consistent with the F1≈0.54 operating point reported above.
 
 ### 7.5 Comparison with Literature
 
@@ -967,26 +988,31 @@ consistent with the F1≈0.57 operating point reported above.
 
 | Approach                             | F1 Score | Delta vs XGBoost (ours) |
 |--------------------------------------|----------|--------------------------|
-| Devign GNN [Zhou et al., 2019]       | 0.561    | +0.006                   |
-| Random Forest (this work)            | 0.532    | +0.035                   |
-| **XGBoost (this work)**              | **0.567** | --                       |
-| ReVeal [Chakraborty et al., 2022]    | 0.589    | -0.022                   |
-| CodeBERT fine-tuned [Lu et al., 2021]| 0.628    | -0.061                   |
-| VulDeePecker [Li et al., 2018]       | 0.671    | -0.104                   |
-| LineVul [Fu & Tantithamthavorn, 2022]| 0.699    | -0.132                   |
+| Devign GNN [Zhou et al., 2019]       | 0.561    | -0.022                   |
+| Random Forest (this work)            | 0.4798   | +0.059                   |
+| **XGBoost (this work)**              | **0.5391** | --                       |
+| ReVeal [Chakraborty et al., 2022]    | 0.589    | -0.050                   |
+| CodeBERT fine-tuned [Lu et al., 2021]| 0.628    | -0.089                   |
+| VulDeePecker [Li et al., 2018]       | 0.671    | -0.132                   |
+| LineVul [Fu & Tantithamthavorn, 2022]| 0.699    | -0.160                   |
 
-Our XGBoost system edges out the graph-based Devign GNN baseline by 0.6 F1
-points but trails every approach that uses a fine-tuned Transformer
-end-to-end (CodeBERT, VulDeePecker, LineVul) by 6–13 F1 points. This is the
-expected ordering: this system uses CodeBERT purely as a **frozen** feature
-extractor feeding a tree ensemble, which is a fundamentally weaker setup than
+Our XGBoost system now trails every row in this table, including the
+graph-based Devign GNN baseline (by 2.2 F1 points), on the corrected data —
+the erratum retracts this paper's original claim of edging out Devign GNN.
+It trails every approach that uses a fine-tuned Transformer end-to-end
+(CodeBERT, VulDeePecker, LineVul) by 8.9–16.0 F1 points. This is the expected
+ordering: this system uses CodeBERT purely as a **frozen** feature extractor
+feeding a tree ensemble, which is a fundamentally weaker setup than
 back-propagating through CodeBERT's own weights for the vulnerability-detection
-objective. The value proposition of this work is not surpassing fine-tuned
-Transformer baselines — it is that a frozen-embedding, GPU-free pipeline
-still delivers a positive, explainable signal (Section 8) with a computational
-footprint that fine-tuned alternatives do not have, and it does so with a
-fully interpretable structural-feature layer that a black-box fine-tuned model
-does not expose.
+objective. The value proposition of this work was never meant to be
+surpassing fine-tuned Transformer baselines or even the GNN baseline — it is
+that a frozen-embedding, GPU-free pipeline still delivers a positive,
+explainable signal (Section 8) with a computational footprint that fine-tuned
+alternatives do not have, and it does so with a fully interpretable
+structural-feature layer that a black-box fine-tuned model does not expose;
+on the corrected numbers that signal is real but weaker than originally
+reported, and the paper no longer claims parity with or improvement over the
+GNN baseline.
 
 ---
 
@@ -1016,13 +1042,38 @@ and the other does not. The [CLS] embedding, having been pretrained on millions
 of code examples, encodes some notion of "this pattern is associated with error
 handling" that structural counts cannot.
 
-None of these three sources of signal is sufficient alone. An ablation
+None of these three sources of signal is sufficient alone. ~~An ablation
 confirms this on the real trained models: an XGBoost classifier trained on
 the 24 structural/metric features alone scores F1 = 0.548, versus F1 = 0.567
 for the full 792-dimensional fusion — a modest but real +1.9 point gain from
-adding CodeBERT's semantic signal. Fusion helps; it does not transform
-performance, and Section 8.2 explains why the embedding branch's contribution
-is capped.
+adding CodeBERT's semantic signal.~~ **This specific structural-only-vs-full-
+fusion figure was measured once, on the corrupted (pre-fix) dataset, and has
+not been re-run on the corrected data** — it is struck through rather than
+silently restated, per the erratum above, and is not currently a claim this
+paper makes.
+
+A separate, newer ablation *was* run on the corrected data
+(`docs/MODALITY_ABLATION_RESULTS.md`), directly answering the fusion-vs-
+single-modality question, and its honest reading is more mixed than the
+struck-through figure above suggested. It is decisive on one point:
+structural-only combinations are clearly weaker than anything that includes
+CodeBERT — AST-only (F1 0.494) and Metrics-only (F1 0.480) are the two
+weakest subsets, and even AST+Metrics together (F1 0.502) trails the
+*weakest* CodeBERT-inclusive subset (CodeBERT+Metrics, F1 0.533) by 3.1
+points. But it is **not** decisive on whether adding AST/metrics on top of
+CodeBERT is worth it: the four CodeBERT-inclusive subsets — CodeBERT alone
+(F1 0.5418), CodeBERT+AST (F1 0.5444), CodeBERT+Metrics (F1 0.5326), and
+full fusion (F1 0.5391) — cluster within 1.2 F1 points of each other, and
+**full fusion is not the highest-F1 subset**: CodeBERT alone and
+CodeBERT+AST both score higher F1 than full fusion at the default 0.5
+threshold. Full fusion does hold the single highest AUC (0.6346, vs. 0.6309
+for CodeBERT alone), the threshold-independent metric. Given a single 80/20
+split with no cross-validation, this spread is plausibly within ordinary
+sampling noise, so the honest statement is that fusion is **justified
+relative to structural-only approaches**, but does **not** show a clear,
+unambiguous F1 win over CodeBERT alone — "roughly comparable, with fusion
+holding a small AUC edge," not "fusion clearly wins." Section 8.2 explains
+why the embedding branch's contribution is capped either way.
 
 ### 8.2 Embedding Anisotropy Limits the Semantic Branch
 
@@ -1042,20 +1093,26 @@ embeddings is a known limitation of using pretrained Transformers as static
 feature extractors rather than fine-tuning them end-to-end. Practically, it
 means the 768-dimensional embedding block behaves as a diffuse, low-per-dimension-signal
 feature group: no individual embedding dimension is highly informative (Table 3),
-but their combined mass still contributes real signal, as the fusion ablation
-above shows. This is the central reason this system's F1 (0.567) falls short of
-fine-tuned Transformer baselines (Section 7.5): fine-tuning back-propagates the
-vulnerability-detection objective *into* CodeBERT's representations, undoing the
-anisotropic collapse for this task, while a frozen-embedding pipeline cannot.
+but their combined mass still contributes real signal, as the modality
+ablation above shows. This is the central reason this system's F1 (0.5391)
+falls short of fine-tuned Transformer baselines (Section 7.5): fine-tuning
+back-propagates the vulnerability-detection objective *into* CodeBERT's
+representations, undoing the anisotropic collapse for this task, while a
+frozen-embedding pipeline cannot.
 
-We tested whether reducing the embedding block's dimensionality via PCA
+~~We tested whether reducing the embedding block's dimensionality via PCA
 (retaining components that explain genuine variance, rather than the full
 768 largely-redundant dimensions) could partially compensate: PCA to 64
-components (93.0% variance retained) improved XGBoost F1 from 0.567 to 0.573
-— confirming the anisotropy diagnosis and yielding a small real gain, though
-not one large enough to justify the added inference-pipeline complexity for
-this deployment, so the production model keeps the original 768-dimensional
-block.
+components (93.0% variance retained) improved XGBoost F1 from 0.567 to
+0.573 — confirming the anisotropy diagnosis and yielding a small real
+gain, though not one large enough to justify the added inference-pipeline
+complexity for this deployment, so the production model keeps the original
+768-dimensional block.~~ **This PCA experiment was also measured once, on
+the corrupted (pre-fix) dataset, and has not been re-run on the corrected
+data** — struck through per the erratum rather than silently restated;
+whether PCA still yields a small gain on the corrected embeddings is an
+open question this paper does not currently answer. The production model
+keeps the original 768-dimensional block regardless.
 
 AST features, by contrast, are not vulnerable to this collapse: `n_if_statements`,
 `n_function_calls`, and similar counts capture structural differences (e.g., a
@@ -1064,43 +1121,45 @@ exactly, regardless of how similar the two functions' semantic embeddings are.
 
 ### 8.3 Structural Features vs. Embeddings: Density vs. Volume
 
-Individual structural features rank among the single most informative
-features in the trained Random Forest — `n_functions`, `n_total_nodes`, and
-`max_line_length` occupy three of the top five slots, and `n_pointer_ops`
-(pointer operation count) ranks 5th overall (Table 3). This is consistent with
-the known characteristics of the Devign source projects: FFmpeg and QEMU are C
-programs with heavy manual memory management, and Devign's vulnerability
-labels skew toward memory-safety bugs (use-after-free, buffer overflow, null
-pointer dereference) that pointer-heavy, structurally large functions are more
-prone to.
+On the corrected model, structural/metric features still punch above their
+weight but less dramatically than the original (invalidated) analysis
+claimed: two lexical metric features, `blank_lines` and `avg_line_length`,
+are now the single two most informative features in the trained Random
+Forest, and the AST feature `n_total_nodes` ranks 3rd overall — but no
+other structural/metric feature cracks the top 20 except `total_lines` and
+`loc` at ranks 18 and 20 (Table 3). `n_pointer_ops`, which the original
+analysis singled out as a top-5 memory-safety signal, does not appear in
+the corrected top 20 at all. This is a real shift, not a rounding
+difference, and it is reported as measured rather than smoothed to match
+the original narrative.
 
-However, because there are only 24 structural/metric features against 768
-embedding dimensions, their *combined* importance mass (3.53%) is small next to
-the embedding block's aggregate 96.47% (Table 3) — not because embeddings are
-individually more informative (they are not; see Section 8.2), but because
-768 small contributions still sum to a larger total than 24 larger ones. Both
-observations are true simultaneously: structural features are the more
-information-dense signal per feature, while embeddings carry the larger total
-share of what the model relies on. A practical, actionable takeaway survives
-this correction: functions with high pointer density and large structural size
-remain a reasonable heuristic for prioritising manual code review, consistent
-with the ranking of `n_pointer_ops` and structural-size features in Table 3.
+Because there are only 24 structural/metric features against 768 embedding
+dimensions, their *combined* importance mass (3.25%: 1.28% AST + 1.97%
+Metric) is small next to the embedding block's aggregate 96.75% (Table 3) —
+not because embeddings are individually more informative (they are not; see
+Section 8.2), but because 768 small contributions still sum to a larger
+total than 24 larger ones. A practical takeaway survives this correction,
+though more weakly than before: `blank_lines`, `avg_line_length`, and
+`n_total_nodes` remain individually informative signals worth surfacing to
+a reviewer, but the corrected data no longer supports pointer density
+specifically as a top-tier heuristic for prioritising manual code review.
 
 ### 8.4 XGBoost vs Random Forest
 
-XGBoost's consistent edge over Random Forest (Accuracy: 61.1% vs 60.0%;
-F1: 0.567 vs 0.532) can be attributed to its sequential boosting mechanism.
+XGBoost's consistent edge over Random Forest (Accuracy: 59.32% vs 57.21%;
+F1: 0.5391 vs 0.4798) can be attributed to its sequential boosting mechanism.
 After the first tree is trained, subsequent trees specifically target the samples
 that the previous trees misclassified. For vulnerability detection, the hard
 cases — functions that look structurally safe but contain subtle logical bugs
 — are progressively emphasised in training. Random Forest trains all 100 trees
 independently, giving equal weight to easy and hard cases. The margin between
-them (3.5 F1 points) is real but modest, consistent with both models drawing
-on the same underlying, anisotropy-limited feature space (Section 8.2) rather
-than one architecture unlocking materially more signal than the other.
+them (5.9 F1 points, wider than the pre-correction estimate) is real,
+consistent with both models drawing on the same underlying,
+anisotropy-limited feature space (Section 8.2) rather than one architecture
+unlocking materially more signal than the other.
 
 XGBoost's training time was also higher in absolute terms than Random Forest's
-on this hardware (12.5 s vs 5.6 s, per `models/training_metadata.json`) due to
+on this hardware (12.64 s vs 6.69 s, per `models/training_metadata.json`) due to
 its sequential (non-parallel) boosting rounds, despite each round using
 histogram-based split finding; Random Forest's 100 trees train independently
 and in parallel across CPU cores.
@@ -1139,7 +1198,7 @@ require retraining or fine-tuning.
 **Frozen-Embedding Ceiling:** As established in Section 8.2, CodeBERT's
 `[CLS]` embeddings exhibit substantial anisotropy on this dataset (mean
 pairwise cosine similarity 0.9833), which caps the semantic branch's
-discriminative contribution. This is the primary reason overall F1 (0.567)
+discriminative contribution. This is the primary reason overall F1 (0.5391)
 trails fine-tuned Transformer baselines by 6–13 points (Table 5). Closing this
 gap would require fine-tuning CodeBERT end-to-end on the vulnerability-detection
 objective rather than using it as a static feature extractor — a substantially
@@ -1147,13 +1206,16 @@ larger, GPU-bound undertaking left as future work (Section 10.5).
 
 **False Negative Rate:** At the default 0.5 decision threshold used for the
 headline metrics reported in this paper (Accuracy/Precision/Recall/F1/AUC
-above), the model misses approximately 20.1% of vulnerabilities (1,094 of
-5,445 test samples). A subsequent experiment (Section 10.6) found that a
-validation-selected threshold of 0.32 raises recall to 90.4% at the cost of
-precision falling to 48.6% (F1 0.554→0.632 on a same-hyperparameter model);
-this threshold has since been adopted for the live system's binary verdict,
-while the headline metrics in this paper remain reported at the standard 0.5
-threshold for comparability with the wider literature (Table 5).
+above), the model misses approximately 47.8% of vulnerabilities (1,187 of
+2,483 vulnerable test samples) — a substantially higher miss rate than an
+earlier, since-invalidated analysis of this section reported (20.1%; see
+erratum). A subsequent experiment (Section 10.6), re-run on the corrected
+data, found that a validation-selected threshold of 0.26 raises recall to
+97.70% at the cost of precision falling to 47.15% (F1 0.5315→0.6361 on a
+same-hyperparameter model); this threshold has since been adopted for the
+live system's binary verdict, while the headline metrics in this paper
+remain reported at the standard 0.5 threshold for comparability with the
+wider literature (Table 5).
 
 **No Authentication in the Reference Implementation:** The web platform
 built around this pipeline (`backend/`, `frontend/`) has no user accounts
@@ -1177,40 +1239,55 @@ that combines Abstract Syntax Tree structural features, software quality metrics
 and CodeBERT deep semantic embeddings through early feature fusion into a
 792-dimensional representation, upon which an XGBoost classifier is trained.
 
-The system was evaluated on the Devign benchmark dataset of 27,225 C functions
-from FFmpeg and QEMU, achieving **Accuracy = 61.12%, Precision = 57.57%,
-Recall = 55.92%, F1 = 0.5673**, and **AUC-ROC = 0.648**, computed directly from
-the trained model artifacts on a held-out 20% test set — a modest improvement
-over the Devign GNN baseline (F1 = 0.561) but below fine-tuned Transformer
-baselines (Table 5).
+The system was evaluated on the Devign benchmark dataset of 27,231 C functions
+from FFmpeg and QEMU, achieving **Accuracy = 59.32%, Precision = 55.74%,
+Recall = 52.19%, F1 = 0.5391**, and **AUC-ROC = 0.6346**, computed directly from
+the trained model artifacts on a held-out 20% test set — these figures are
+corrected post-submission (see erratum); the corrected F1 now falls slightly
+**below** the Devign GNN baseline (F1 = 0.561) that an earlier, invalidated
+version of this analysis claimed a "modest improvement" over, and remains
+below fine-tuned Transformer baselines (Table 5).
 
 Three findings deserve particular emphasis:
 
-1. **Multi-modal fusion provides a small but real and measurable gain over
-   structural features alone** (F1 0.548 → 0.567, Section 8.1), but its
-   ceiling is capped by CodeBERT embedding anisotropy: a diagnostic experiment
-   measured mean pairwise cosine similarity of 0.9833 across sampled Devign
-   functions, showing that frozen `[CLS]` embeddings carry much less
-   per-dimension discriminative signal than their 768-dimensional size
-   suggests (Section 8.2). This is a genuine, reproducible finding about the
-   limits of frozen-embedding feature extraction, not a failure of the fusion
-   idea itself.
+1. **Multi-modal fusion is clearly justified relative to structural-only
+   approaches, but does not show a clear, unambiguous F1 win over CodeBERT
+   alone.** A modality ablation on the corrected data
+   (`docs/MODALITY_ABLATION_RESULTS.md`, Section 8.1) found structural-only
+   subsets (AST, Metrics, or both) meaningfully weaker than any
+   CodeBERT-inclusive subset, but among the CodeBERT-inclusive subsets — full
+   fusion (F1 0.5391), CodeBERT alone (0.5418), CodeBERT+AST (0.5444),
+   CodeBERT+Metrics (0.5326) — full fusion holds the highest AUC (0.6346) but
+   is *not* the highest-F1 subset. This is reported as measured, not smoothed
+   into a cleaner "fusion always wins" story. The fusion's ceiling is capped
+   by CodeBERT embedding anisotropy: a diagnostic experiment measured mean
+   pairwise cosine similarity of 0.9833 across sampled Devign functions,
+   showing that frozen `[CLS]` embeddings carry much less per-dimension
+   discriminative signal than their 768-dimensional size suggests (Section
+   8.2). Two earlier, corrupted-data sub-experiments that originally reported
+   a structural-only-vs-fusion F1 gain (0.548→0.567) and a PCA-64-components
+   gain (0.567→0.573) have not been re-run on the corrected data and remain
+   struck through in Section 8.1/8.2, not restated as current findings.
 
-2. **Structural features are information-dense; embeddings are informative in
-   aggregate.** Individual structural features (`n_functions`, `n_total_nodes`,
-   `max_line_length`, `n_pointer_ops`) rank among the single most important
-   features in the trained model, while the 768 CodeBERT dimensions
-   collectively account for 96.5% of total importance mass simply through
-   volume (Section 8.3) — both true, and together they motivate keeping all
-   three branches rather than any one alone.
+2. **Structural features are individually informative but no longer among the
+   single most important features overall.** On the corrected model, two
+   lexical metric features (`blank_lines`, `avg_line_length`) rank 1st and
+   2nd, and the AST feature `n_total_nodes` ranks 3rd, but the remaining
+   top-20 slots are dominated by CodeBERT embedding dimensions — a shift from
+   the original (invalidated) analysis, which had ranked `n_pointer_ops`
+   among the top 5. The 768 CodeBERT dimensions collectively account for
+   96.75% of total importance mass simply through volume (Section 8.3) —
+   both true, and together they motivate keeping all three branches rather
+   than any one alone.
 
-3. **Competitive-with-graph-baseline performance without GPU-intensive
-   fine-tuning is achievable, though it trails fully fine-tuned Transformer
-   approaches.** By using CodeBERT as a frozen feature extractor rather than a
+3. **GPU-free deployment is achievable, but at the cost of trailing every
+   published baseline in Table 5, including the graph-based Devign GNN
+   baseline.** By using CodeBERT as a frozen feature extractor rather than a
    fine-tuned end-to-end model, this system requires no GPU infrastructure for
    the classification stage, making it deployable in resource-constrained
-   settings — at the cost of the 6–13 F1-point gap to fine-tuned baselines
-   documented in Table 5 and explained by finding 1.
+   settings — but the corrected numbers no longer support framing this as
+   "competitive with" the GNN baseline; the value proposition rests on cost
+   and deployability, not on matching baseline accuracy (finding 1).
 
 The proposed framework demonstrates that principled multi-modal feature
 engineering, combined with a well-calibrated gradient-boosting classifier, is a
@@ -1278,21 +1355,30 @@ literature baselines in Table 5. The cost is significantly higher GPU
 requirements and training time than the current frozen-feature pipeline, which
 is why it is scoped as future work rather than attempted in this study.
 
-### 10.6 Decision Threshold Optimisation (completed in a later iteration)
+### 10.6 Decision Threshold Optimisation (completed in a later iteration; re-run after the fusion-alignment fix)
 
 Unlike the other items in this section, this one has since been carried out
-rather than left as pure future work. A held-out validation set was carved
-out of the training portion only (the test set used for this paper's
-headline metrics was never touched during threshold selection), thresholds
-from 0.05–0.95 were swept on that validation set, and the F1-maximizing
-threshold (0.32) was selected and evaluated exactly once on the untouched
-test set: F1 rose from 0.554 to 0.632 (accuracy 60.2%→52.0%, precision
-56.6%→48.6%, recall 54.3%→90.4%), with AUC unchanged at 0.638, confirming the
-gain is a genuine recalibration of the decision boundary rather than a
-different model. This threshold is now used for the deployed system's binary
-verdict; the headline metrics reported earlier in this paper are kept at the
+rather than left as pure future work, and it has since been **re-run on the
+corrected, alignment-fixed dataset** (see erratum) — the numbers below
+supersede an earlier run on the corrupted data that originally selected a
+threshold of 0.32. A held-out validation set was carved out of the training
+portion only (the test set used for this paper's headline metrics was never
+touched during threshold selection; split sizes: train=17,427, val=4,357,
+test=5,447), thresholds from 0.05–0.95 were swept on that validation set,
+and the F1-maximizing threshold (**0.26**) was selected and evaluated
+exactly once on the untouched test set: F1 rose from 0.5315 to 0.6361
+(accuracy 58.34%→49.04%, precision 54.53%→47.15%, recall 51.83%→**97.70%**),
+with AUC unchanged at 0.6268, confirming the gain is a genuine recalibration
+of the decision boundary rather than a different model. The corrected
+threshold is even more recall-aggressive than the original (invalidated)
+0.32 value: at 0.26 the model flags almost every function as vulnerable,
+catching nearly all true positives at the cost of a high false-positive
+rate (precision 47.15%). This threshold (0.26) is now used for the deployed
+system's binary verdict (`app/predictor.py`, `VULNERABILITY_THRESHOLD =
+0.26`); the headline metrics reported earlier in this paper are kept at the
 standard 0.5 threshold for comparability with prior literature (Table 5).
-Full methodology and results: `docs/ML_EXPERIMENTS.md`.
+Full methodology and results: `docs/ML_EXPERIMENTS.md`,
+`docs/ML_ALIGNMENT_FIX_RESULTS.md` §7.
 
 ### 10.7 Line-Level Vulnerability Localisation
 
