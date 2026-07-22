@@ -1,9 +1,10 @@
-# Optimization Suggestions — Phase 1 Design (not implemented)
+# Optimization Suggestions — Phase 1 Design (implemented, Phase 2 complete)
 
-**This is a design report only — nothing described here has been built.**
-A new, separate, clearly-labeled capability alongside the existing
-security vulnerability detection. Needs sign-off before any code is
-written (Phase 2).
+**Status: implemented.** Design signed off as written (all 5 checks in
+§1.1–1.5, §1.6's exclusion, the Recommendations.tsx placement in §3, and
+the analysis_cache lazy-integration point in §2) — no changes to scope
+during implementation. A new, separate, clearly-labeled capability
+alongside the existing security vulnerability detection.
 
 **Critical boundary, restated and honored throughout this design:** this
 must never be merged into the ML risk score or presented as ML-derived.
@@ -218,3 +219,39 @@ design.
    a new dedicated page (§3).
 3. Confirm the `analysis_cache`-based lazy integration point (§2) rather
    than eager computation at scan time.
+
+## 7. Implementation notes (Phase 2)
+
+Built exactly as designed, no scope changes:
+
+- **`backend/optimization_analyzer.py`** — the 5 checks from §1.1–1.5 only.
+  Re-parses independently via `code_intelligence.parse()`/`find_functions()`
+  (resolving the open question in the old §4 in favor of the cleaner module
+  boundary, matching the dangerous-API detector's own architectural class).
+  Every response includes `"heuristic_based": true`; nothing in this module
+  computes or references `vuln_probability`/`risk_level`/the trained
+  classifier. §1.6's exclusion (general O(n²) nested-loop detection) was
+  **not** implemented, exactly as designed — not a gap, a deliberate
+  reliability call already made in §1.6.
+- **Wiring**: `analysis_cache.get_optimization_findings(record)` — same
+  lazy, per-`ScanRecord.id`-cached pattern as `get_intel()`/
+  `get_line_risks()`. New endpoint `GET /api/scan/{scan_id}/optimization`
+  in `routers/intelligence.py`. Works unmodified across every existing scan
+  entry point (single-file, batch/ZIP, GitHub) because all of them already
+  produce the same `ScanRecord` rows this endpoint reads by id — no new
+  scan pipeline needed, confirming §2's "reuse, don't duplicate" premise.
+- **UI**: a new "Performance & Efficiency Suggestions" panel on
+  `Recommendations.tsx` (§3's recommended placement, not a new page),
+  explicitly subtitled "heuristic-based, not part of the vulnerability
+  score" and visually separate from the security best-practices panels
+  above it.
+- **Tests**: `backend/tests/test_optimization_analyzer.py` — one
+  known-inefficient fixture tripping all 5 checks (6 total findings, since
+  a `realloc()` inside a loop is correctly counted by both §1.3 and §1.4 —
+  they answer different questions, not a duplicate), one known-clean
+  fixture (idiomatically correct equivalents: hoisted `strlen()`,
+  offset-tracked `sprintf()`, a single exact-size `malloc()` outside any
+  loop, a 2-member struct) tripping none. Plus a cache-identity test in
+  `test_analysis_cache.py`.
+- Not touched, as required: the ML/fusion pipeline, the 0.26 threshold, the
+  trained models, or `paper/research_paper.md`.

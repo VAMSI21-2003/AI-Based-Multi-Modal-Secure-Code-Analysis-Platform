@@ -237,6 +237,24 @@ export interface CodeIntelligence {
 export const getCodeIntelligence = (scanId: string, cfgFunction?: string) =>
   api.get<CodeIntelligence>(`/scan/${scanId}/intelligence`, { params: cfgFunction ? { function: cfgFunction } : {} }).then((r) => r.data);
 
+// ── Optimization Suggestions (heuristic, not ML-derived -- see
+// docs/OPTIMIZATION_SUGGESTIONS_DESIGN.md) ─────────────────────────────────
+
+export interface OptimizationFindings {
+  available: boolean;
+  heuristic_based: boolean;
+  error?: string;
+  loop_invariant_length_calls: { line: number; loop_type: string; variable: string; expression: string; message: string }[];
+  string_growth_in_loop: { line: number; api: string; destination: string; loop_line: number; message: string }[];
+  linear_realloc_growth: { line: number; size_expression: string; loop_line: number; message: string }[];
+  heap_alloc_in_loop: { loop_line: number; loop_type: string; allocation_count: number; allocations: { api: string; line: number }[]; message: string }[];
+  large_struct_by_value: { function: string; parameter: string; struct_name: string; member_count: number; line: number; message: string }[];
+  total_findings: number;
+}
+
+export const getOptimizationFindings = (scanId: string) =>
+  api.get<OptimizationFindings>(`/scan/${scanId}/optimization`).then((r) => r.data);
+
 // ── System Monitor ──────────────────────────────────────────────────────────
 
 export interface SystemStats {

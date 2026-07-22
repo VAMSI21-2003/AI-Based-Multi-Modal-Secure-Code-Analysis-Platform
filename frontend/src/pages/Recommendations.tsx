@@ -1,9 +1,11 @@
-import { Wand2, ShieldCheck, Lightbulb, CheckCircle2 } from "lucide-react";
+import { useEffect, useState } from "react";
+import { Wand2, ShieldCheck, Lightbulb, CheckCircle2, Gauge } from "lucide-react";
 import PageShell from "../components/PageShell";
 import { Spinner } from "../components/Loading";
 import ScanPickerEmpty from "../components/ScanPickerEmpty";
 import ChartCard from "../components/ChartCard";
 import { useActiveScan } from "../hooks/useActiveScan";
+import { getOptimizationFindings, type OptimizationFindings } from "../api/client";
 
 const GENERAL_TIPS = [
   { title: "Buffer Overflow Prevention", tips: [
@@ -27,6 +29,14 @@ const GENERAL_TIPS = [
 
 export default function Recommendations() {
   const { scanId, scan, detail, loading, error } = useActiveScan();
+  const [optimization, setOptimization] = useState<OptimizationFindings | null>(null);
+
+  useEffect(() => {
+    if (!scanId) { setOptimization(null); return; }
+    let cancelled = false;
+    getOptimizationFindings(scanId).then((o) => { if (!cancelled) setOptimization(o); });
+    return () => { cancelled = true; };
+  }, [scanId]);
 
   if (!scanId) {
     return (
@@ -93,12 +103,63 @@ export default function Recommendations() {
       </div>
 
       <div className="mb-2 text-sm font-semibold text-(--text-muted)">General Reference</div>
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
         {GENERAL_TIPS.filter((g) => !detail.recommendations.some((r) => r.title === g.title)).map((p) => (
           <TipCard key={p.title} panel={p} muted />
         ))}
       </div>
+
+      <div className="mb-2 flex items-center gap-2 text-sm font-semibold">
+        <Gauge size={15} className="text-(--accent)" /> Performance &amp; Efficiency Suggestions
+        <span className="text-[10px] font-normal uppercase tracking-wider text-(--text-muted) bg-(--surface-3) rounded-full px-2 py-0.5">
+          heuristic-based, not part of the vulnerability score
+        </span>
+      </div>
+      {!optimization ? (
+        <Spinner label="Running performance checks..." />
+      ) : !optimization.available ? (
+        <div className="card p-4 text-sm text-(--text-secondary)">{optimization.error || "Not available for this scan."}</div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <OptimizationCard
+            title="Loop-Invariant strlen()/sizeof Calls"
+            items={optimization.loop_invariant_length_calls.map((f) => f.message)}
+          />
+          <OptimizationCard
+            title="String Growth Inside a Loop"
+            items={optimization.string_growth_in_loop.map((f) => f.message)}
+          />
+          <OptimizationCard
+            title="Linear realloc() Growth"
+            items={optimization.linear_realloc_growth.map((f) => f.message)}
+          />
+          <OptimizationCard
+            title="Heap Allocation Inside a Loop"
+            items={optimization.heap_alloc_in_loop.map((f) => f.message)}
+          />
+          <OptimizationCard
+            title="Large Struct Passed By Value"
+            items={optimization.large_struct_by_value.map((f) => f.message)}
+          />
+        </div>
+      )}
     </PageShell>
+  );
+}
+
+function OptimizationCard({ title, items }: { title: string; items: string[] }) {
+  return (
+    <ChartCard title={title} subtitle={`${items.length} found`}>
+      {items.length === 0 ? (
+        <div className="text-xs text-(--status-good) flex items-center gap-1.5"><CheckCircle2 size={13} /> None detected.</div>
+      ) : (
+        <ul className="space-y-1.5 max-h-56 overflow-y-auto scrollbar-thin">
+          {items.map((item, i) => (
+            <li key={i} className="text-xs text-(--text-secondary) bg-(--surface-3) rounded-lg px-2.5 py-1.5">{item}</li>
+          ))}
+        </ul>
+      )}
+    </ChartCard>
   );
 }
 

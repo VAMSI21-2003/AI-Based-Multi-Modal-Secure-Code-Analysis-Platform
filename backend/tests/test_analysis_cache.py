@@ -46,3 +46,11 @@ def test_different_records_get_independently_cached_results():
     intel1 = analysis_cache.get_intel(r1)
     intel2 = analysis_cache.get_intel(r2)
     assert intel1 is not intel2
+
+
+def test_get_optimization_findings_returns_the_same_object_on_repeat_calls():
+    record = _fake_record("cache-test-4", VULNERABLE_SNIPPET)
+    first = analysis_cache.get_optimization_findings(record)
+    second = analysis_cache.get_optimization_findings(record)
+    assert first is second
+    assert first["heuristic_based"] is True

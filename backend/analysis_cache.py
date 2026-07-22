@@ -22,11 +22,13 @@ from collections import OrderedDict
 
 import code_intelligence
 import ml_bridge
+import optimization_analyzer
 
 _MAX_ENTRIES = 20_000
 
 _intel_cache: "OrderedDict[str, dict]" = OrderedDict()
 _line_risk_cache: "OrderedDict[str, list]" = OrderedDict()
+_optimization_cache: "OrderedDict[str, dict]" = OrderedDict()
 
 
 def _put(cache: "OrderedDict", key: str, value):
@@ -56,6 +58,20 @@ def get_line_risks(record) -> list:
     return result
 
 
+def get_optimization_findings(record) -> dict:
+    cached = _optimization_cache.get(record.id)
+    if cached is not None:
+        _optimization_cache.move_to_end(record.id)
+        return cached
+    result = optimization_analyzer.analyze(record.code)
+    _put(_optimization_cache, record.id, result)
+    return result
+
+
 def cache_sizes() -> dict:
     """For tests/diagnostics only."""
-    return {"intel_entries": len(_intel_cache), "line_risk_entries": len(_line_risk_cache)}
+    return {
+        "intel_entries": len(_intel_cache),
+        "line_risk_entries": len(_line_risk_cache),
+        "optimization_entries": len(_optimization_cache),
+    }
