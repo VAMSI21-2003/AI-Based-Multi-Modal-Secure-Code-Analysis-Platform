@@ -68,8 +68,36 @@ metrics — explicitly rejected rather than reused); no paragraph from them was 
 paraphrased into the new chapters. This is a process guarantee, not a similarity-tool measurement, and
 should be described to any reader in those terms.
 
-## 8. Formatting spec compliance — deferred to Phase 9
+## 8. Formatting spec compliance — verified after Phase 9
 
-Font, margins, spacing, heading case/size rules, and page numbering are not yet applied (the chapters
-are still in Markdown). Phase 9 assembles the DOCX against `report/FORMAT_SPEC.md`'s explicit table and
-will be its own verification pass (render to PDF, visual check).
+Font, margins, spacing, heading case/size rules, and page numbering are applied per
+`report/FORMAT_SPEC.md`. Verified 2026-07-24 by rendering `Final_Report.docx` to PDF and checking it
+directly (not just trusting the XML):
+
+- **Page border**: `report/MCA_4sem_Project_Report_format.docx` was rendered to PDF and its
+  `word/document.xml` inspected directly — single black rule, `sz=24` (3pt), `space=24` (24pt offset
+  from the page edge). The same border is now written into all 3 `w:sectPr` sections of
+  `Final_Report.docx` (`assemble_docx.py::add_page_border`, called once per section — a border set on
+  only one section would not appear on the others' pages). Confirmed identical on a front-matter page,
+  an early content page, a late content page, and the final page.
+- **Fonts**: python-docx's default template bakes Cambria into every Heading/Title style and Calibri
+  into Normal/List/TOC styles via theme font references, independent of any direct run-level
+  formatting — this was the actual root cause, not a missed run. Fixed by forcing Times New Roman at
+  the *style* level for every style in use (`force_all_style_fonts`), pre-defining `TOC 1/2/3` styles
+  before Word ever populates the TOC field, and a belt-and-suspenders raw-XML purge
+  (`purge_theme_fonts_from_docx` / `report/purge_fonts.py`) run both after the initial build and again
+  after Word's own TOC-field update (which reintroduced a theme font reference on the generated TOC
+  entry runs the first time — the second purge pass catches exactly this). Verified with the real
+  `pdffonts` tool (poppler): only Times New Roman (regular/bold/italic), Consolas (intentional, code
+  blocks), and Symbol/Arial (unavoidable bullet-point glyphs) appear — zero Cambria, zero Calibri.
+- **Diagrams**: Figure 3.1 (offline training pipeline) and Figure 4.1 (system architecture) were
+  monospace ASCII box-and-arrow art; replaced with real matplotlib-generated PNG diagrams
+  (`report/figures/fig_pipeline_offline.png`, `fig_architecture.png`) with proper captions. A real bug
+  was caught during this fix: Figure 4.1's caption originally wrapped across two lines in the markdown
+  source, which silently broke the parser's single-line caption regex and dropped the image entirely
+  (the stray `(`path`)` text leaked into the body text instead) — fixed by keeping the caption on one
+  line, matching the pattern used successfully elsewhere, and reverified by re-rendering the page.
+- **Word/page count**: Word's own `ComputeStatistics` reports 11,743 words across 58 pages in the final
+  render (an independent PyMuPDF text-extraction count over the same PDF gives 12,123 words, the
+  difference being normal tokenization differences between the two tools — both are real counts from
+  the actual rendered document, neither is estimated).

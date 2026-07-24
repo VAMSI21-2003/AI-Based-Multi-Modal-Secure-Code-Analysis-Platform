@@ -20,37 +20,44 @@ its rules encode but, by construction, cannot generalize to defect patterns it h
 programmed to recognize — the core limitation this project's learning-based approach is intended to
 address.
 
-**Sequence-based deep learning.** Li et al. (2018) introduced VulDeePecker, the first widely cited
-system to apply a bidirectional LSTM to "code gadgets" — program slices built around
-security-sensitive API calls — extracted from C/C++ source, demonstrating that a neural sequence model
-could learn vulnerability-indicative patterns directly from token sequences rather than hand-written
-rules. VulDeePecker's dataset was constructed from NVD- and SARD-derived code, prior to and separate
-from the Devign benchmark used in this project. Its central contribution — treating source code as a
-learnable sequence rather than only as a target for pattern matching — is foundational to every
-subsequent learning-based system discussed here, including the CodeBERT-based embedding branch of this
-project.
+**Sequence-based deep learning.** The static-analysis limitation above — no generalization beyond the
+rule library — is exactly what motivated the shift toward learning from examples instead of hand-coded
+patterns. Li et al. (2018) were among the first to show this was practical for vulnerability detection:
+their VulDeePecker system cut C/C++ source into "code gadgets" (slices of a program built around
+security-relevant API calls) and fed them to a bidirectional LSTM, letting the network discover
+vulnerability-indicative patterns on its own rather than being told what to look for. The dataset behind
+that result came from NVD and SARD, not from Devign, which did not yet exist. What matters for this
+project is the underlying shift VulDeePecker represents — code as a sequence a model can learn from,
+rather than only a target for pattern matching — since every learning-based system discussed below,
+including this project's own CodeBERT branch, builds on that same shift.
 
-**Graph-based structural learning.** Zhou et al. (2019) introduced the Devign dataset and a Gated
-Graph Neural Network (GGNN) that operates on a joint graph combining a function's Abstract Syntax Tree,
-Control Flow Graph, and Data Flow Graph, reporting substantial relative improvements in accuracy and F1
-over prior sequence- and pattern-based baselines when evaluated on real-world C functions collected
-from the FFmpeg and QEMU projects. The Devign dataset — 27,318 functions before cleaning, 27,231 after
-this project's preprocessing — is the dataset used throughout this project, and the GGNN's use of
-structural graph information (rather than a flat token sequence) directly motivates this project's own
-AST-derived feature branch, though this project encodes structure as a fixed-size hand-engineered
-feature vector rather than learning it end-to-end through message passing on a graph.
+**Graph-based structural learning.** A different line of work argues that flattening a function into a
+token sequence throws away information a reviewer would actually use: which branch calls which, how
+values flow between statements, how deeply a block is nested. Zhou et al. (2019) built the Devign
+benchmark around this argument, merging a function's syntax tree with its control- and data-flow edges
+into one graph and letting a Gated Graph Neural Network learn directly over that structure, reporting
+sizeable accuracy and F1 gains over the sequence- and rule-based baselines it was compared against, on
+real-world functions drawn from FFmpeg and QEMU. That same benchmark — 27,318 functions before this
+project's own cleaning step, 27,231 after — is the dataset this project trains and evaluates on
+throughout. The underlying argument (structure carries signal a flat token sequence misses) is also why
+this project includes an AST-derived feature branch of its own; the difference is that this project
+counts structural properties into a fixed-size vector rather than learning a graph representation
+end-to-end, trading some of the GNN's expressiveness for a much simpler, cheaper-to-train model.
 
-**Pretrained transformer models for code.** Following the introduction of BERT (Devlin et al., 2019)
-for natural language, Feng et al. (2020) introduced CodeBERT, a bimodal Transformer pretrained on 6.4
-million (code, documentation) pairs across six programming languages using masked language modelling
-and replaced-token-detection objectives. Lu et al. (2021) subsequently included a Devign-based defect
-detection task in the CodeXGLUE benchmark suite (a 21,854/2,732/2,732 train/validation/test split of
-the Devign functions) and reported that a fine-tuned CodeBERT classifier reaches approximately 62.1%
-accuracy on this task using the token sequence alone, without any explicit structural or metric-based
-features. This project reuses CodeBERT specifically as a fixed feature extractor (the pretrained
-`[CLS]` embedding, not fine-tuned end-to-end) for its semantic branch, and Chapter 7 compares this
-project's fused-model result against the CodeXGLUE fine-tuned-CodeBERT figure as an external reference
-point.
+**Pretrained transformer models for code.** Once BERT (Devlin et al., 2019) showed that a Transformer
+pretrained on unlabeled text could be fine-tuned for many downstream natural-language tasks, an obvious
+follow-up question was whether the same recipe transfers to source code. Feng et al. (2020) answered it
+with CodeBERT: rather than pretrain on natural language alone, they trained on paired code and
+documentation spanning six programming languages (6.4 million pairs), combining a masked-language
+objective with a second task that asks the model to spot which tokens were swapped for plausible
+alternatives — giving the resulting embeddings some sensitivity to code, not just to natural-language
+patterns. Lu et al. (2021) later folded a Devign-based defect-detection split into the CodeXGLUE
+benchmark suite (21,854/2,732/2,732 train/validation/test functions) and reported that fine-tuning
+CodeBERT on the raw token sequence alone — no structural or metric features at all — already reaches
+around 62.1% accuracy. This project does not fine-tune CodeBERT; it uses the pretrained `[CLS]`
+embedding as a fixed, off-the-shelf semantic feature, and Chapter 7 places this project's own
+fused-model result alongside the CodeXGLUE fine-tuned-CodeBERT figure as an external point of
+reference.
 
 **Realism of benchmark evaluation.** Chakraborty et al. (2020), in the paper introducing the ReVeal
 study ("Deep Learning based Vulnerability Detection: Are We There Yet?"), evaluated several

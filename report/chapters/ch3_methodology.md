@@ -34,29 +34,16 @@ remediation suggestion.
 The proposed system has two halves that share code but run on different schedules: an **offline
 training pipeline** (run once, ahead of time, to produce the trained model artifacts) and an **online
 serving application** (the FastAPI backend and React frontend, which load those artifacts and reuse the
-same feature-extraction functions to score new code on demand). Figure 3.1 (Chapter 4) gives the full
-architecture diagram; in outline:
+same feature-extraction functions to score new code on demand). Figure 3.1 shows the offline pipeline in
+full; Figure 4.1 (Chapter 4) shows the online serving architecture built on top of its output.
 
-```
-Devign raw dataset
-   -> preprocessing (dedup, null/empty/short-function removal)
-   -> three parallel feature-extraction branches:
-        - CodeBERT [CLS] embedding (768-d)
-        - AST structural features via tree-sitter (11-d)
-        - software metrics from source text (13-d)
-   -> feature fusion on a stable per-function ID (792-d fused vector)
-   -> XGBoost / Random Forest training (80/20 split, seed 42)
-   -> trained model artifacts (models/xgboost.json, models/random_forest.joblib)
-        |
-        v
-FastAPI backend (loads artifacts once at startup)
-   -> reuses the same extraction functions for a newly submitted function
-   -> SQLite-backed scan history, recommendations, auto-patch, graph analysis
-        |
-        v
-React/TypeScript frontend (Scanner, Analysis, Recommendations, AutoPatch,
-Dependency/Call/Knowledge graphs, GitHub scan, CI/CD status)
-```
+**Figure 3.1: Offline training pipeline**
+(`report/figures/fig_pipeline_offline.png`). Devign raw dataset → preprocessing (dedup, null/empty/
+short-function removal, 27,318 → 27,231 samples) → three parallel feature-extraction branches
+(CodeBERT `[CLS]` embedding, 768-d; AST structural features via tree-sitter, 11-d; software metrics
+from source text, 13-d) → feature fusion on a stable per-function ID (792-d fused vector) → XGBoost /
+Random Forest training (80/20 split, seed 42) → trained model artifacts
+(`models/xgboost.json`, `models/random_forest.joblib`).
 
 ### 3.2.2 Features and Functionalities
 

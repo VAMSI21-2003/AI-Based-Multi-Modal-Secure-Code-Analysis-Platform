@@ -20,6 +20,143 @@ PAGE_W = Inches(8.27)
 PAGE_H = Inches(11.69)
 
 
+def force_style_font(doc, style_name, font_name=FONT_NAME, size=None, bold=None,
+                      base_on_style=None, style_type=None):
+    """Explicitly sets font on a style's rPr, stripping any asciiTheme/hAnsiTheme/
+    cstheme/eastAsiaTheme attributes so the theme's Cambria/Calibri can never show
+    through. Creates the style (based on Normal) if it doesn't exist yet -- this
+    matters for TOC 1/2/3, which Word would otherwise invent from its own Calibri
+    based latent style the first time the TOC field is populated."""
+    from docx.enum.style import WD_STYLE_TYPE
+    try:
+        style = doc.styles[style_name]
+    except KeyError:
+        style = doc.styles.add_style(style_name, style_type or WD_STYLE_TYPE.PARAGRAPH)
+        if base_on_style:
+            style.base_style = doc.styles[base_on_style]
+    style.font.name = font_name
+    if size:
+        style.font.size = Pt(size)
+    if bold is not None:
+        style.font.bold = bold
+    rpr = style.element.get_or_add_rPr()
+    rFonts = rpr.find(qn('w:rFonts'))
+    if rFonts is None:
+        rFonts = OxmlElement('w:rFonts')
+        rpr.append(rFonts)
+    for theme_attr in ('w:asciiTheme', 'w:hAnsiTheme', 'w:cstheme', 'w:eastAsiaTheme'):
+        key = qn(theme_attr)
+        if rFonts.get(key) is not None:
+            del rFonts.attrib[key]
+    rFonts.set(qn('w:ascii'), font_name)
+    rFonts.set(qn('w:hAnsi'), font_name)
+    rFonts.set(qn('w:cs'), font_name)
+    return style
+
+
+def force_all_style_fonts(doc):
+    """Every built-in style python-docx's default template ships with a Cambria
+    (majorHAnsi theme) or Calibri (minorHAnsi theme) font baked in, independent of
+    any direct run-level formatting applied on top. Heading styles use Cambria;
+    Normal/List/TOC styles use Calibri. Both must be overridden at the STYLE level,
+    not just on individual runs, or pdffonts will keep finding them wherever a
+    paragraph/run doesn't carry a full direct override (e.g. Word's own
+    auto-generated TOC entry text)."""
+    for name in ['Normal', 'Title', 'Subtitle', 'Heading 1', 'Heading 2', 'Heading 3',
+                 'Heading 4', 'Heading 5', 'List Bullet', 'List Number', 'List Paragraph',
+                 'Caption', 'Quote', 'Intense Quote', 'Strong', 'Emphasis', 'Hyperlink',
+                 'Default Paragraph Font', 'Header', 'Footer', 'Table Grid',
+                 'No Spacing']:
+        force_style_font(doc, name)
+    # TOC 1-3: pre-create with Times New Roman BEFORE Word ever populates the TOC
+    # field, so Word reuses these definitions instead of inventing Calibri ones.
+    for name in ['TOC 1', 'TOC 2', 'TOC 3']:
+        force_style_font(doc, name, base_on_style='Normal')
+
+
+def purge_theme_fonts_from_docx(path):
+    """Belt-and-suspenders post-process: after Word's own COM automation updates
+    the TOC field (which can (re)introduce asciiTheme='minorHAnsi' on the
+    generated entry runs even when the TOC 1/2/3 styles were pre-defined), strip
+    every remaining theme font reference directly from the saved .docx XML and
+    replace literal Cambria/Calibri typeface names with Times New Roman, so no
+    code path can leave a non-Times-New-Roman font in the final file."""
+    import zipfile, shutil, re as _re
+    tmp_path = path + '.tmp'
+    with zipfile.ZipFile(path, 'r') as zin:
+        names = zin.namelist()
+        contents = {n: zin.read(n) for n in names}
+
+    theme_attr_re = _re.compile(
+        rb'\s(?:w:asciiTheme|w:hAnsiTheme|w:cstheme|w:eastAsiaTheme)="[^"]*"')
+
+    def fix_xml_bytes(data):
+        text = data.decode('utf-8')
+        # Any <w:rFonts .../> that had a theme attribute needs an explicit
+        # Times New Roman fallback if it doesn't already carry a literal ascii/hAnsi.
+        def fix_rfonts(m):
+            tag = m.group(0)
+            if 'asciiTheme' in tag or 'hAnsiTheme' in tag or 'cstheme' in tag or 'eastAsiaTheme' in tag:
+                tag = theme_attr_re.sub(b'', tag.encode('utf-8')).decode('utf-8')
+                if 'w:ascii="' not in tag:
+                    tag = tag.replace('<w:rFonts', '<w:rFonts w:ascii="Times New Roman" '
+                                                    'w:hAnsi="Times New Roman" w:cs="Times New Roman"')
+            return tag
+        text = _re.sub(r'<w:rFonts\b[^/]*/>', fix_rfonts, text)
+        # Literal theme-font typeface names that might remain anywhere else (e.g. theme1.xml)
+        for bad in ('Cambria', 'Calibri Light', 'Calibri-Bold', 'Calibri'):
+            text = text.replace(f'typeface="{bad}"', 'typeface="Times New Roman"')
+        return text.encode('utf-8')
+
+    changed = 0
+    for n in ['word/styles.xml', 'word/document.xml', 'word/theme/theme1.xml']:
+        if n in contents:
+            before = contents[n]
+            after = fix_xml_bytes(before)
+            if after != before:
+                changed += 1
+            contents[n] = after
+    for n in names:
+        if n.startswith('word/header') or n.startswith('word/footer'):
+            contents[n] = fix_xml_bytes(contents[n])
+
+    with zipfile.ZipFile(tmp_path, 'w', zipfile.ZIP_DEFLATED) as zout:
+        for n in names:
+            zout.writestr(n, contents[n])
+    shutil.move(tmp_path, path)
+    print(f"purge_theme_fonts_from_docx: rewrote {changed} XML part(s) with theme font references")
+
+
+def add_page_border(section):
+    """Matches report/MCA_4sem_Project_Report_format.docx's own page border exactly
+    (read directly from its word/document.xml): single black rule, 3pt weight
+    (sz=24 eighths-of-a-point), 24pt offset from the page edge on all 4 sides.
+    Must be called on EVERY section -- python-docx sections do not share sectPr,
+    so a border added to only one section would appear on some pages and not
+    others."""
+    sectPr = section._sectPr
+    existing = sectPr.find(qn('w:pgBorders'))
+    if existing is not None:
+        sectPr.remove(existing)
+    pgBorders = OxmlElement('w:pgBorders')
+    pgBorders.set(qn('w:offsetFrom'), 'page')
+    for edge in ('top', 'left', 'bottom', 'right'):
+        el = OxmlElement(f'w:{edge}')
+        el.set(qn('w:val'), 'single')
+        el.set(qn('w:sz'), '24')
+        el.set(qn('w:space'), '24')
+        el.set(qn('w:color'), '000000')
+        pgBorders.append(el)
+    # OOXML CT_SectPr schema order: pgSz, pgMar, ..., pgBorders, ..., pgNumType, cols, ...
+    # pgBorders must be inserted right after pgMar (and before pgNumType/cols) or
+    # Word will silently reject/ignore the element on load.
+    pgMar = sectPr.find(qn('w:pgMar'))
+    if pgMar is not None:
+        pgMar.addnext(pgBorders)
+    else:
+        sectPr.insert(0, pgBorders)
+
+
 def set_section_page_setup(section):
     section.page_width = PAGE_W
     section.page_height = PAGE_H
@@ -103,21 +240,17 @@ def blank(doc, n=1):
 # ---------------------------------------------------------------------------
 doc = Document()
 
-# Set base Normal style
+# Force Times New Roman at the STYLE level (Normal, every Heading, Title, TOC 1-3,
+# List styles, etc.) -- not just on individual runs -- since python-docx's default
+# template bakes in Cambria (headings) / Calibri (Normal, lists, TOC) via theme
+# font references that survive independently of direct run formatting.
+force_all_style_fonts(doc)
 normal = doc.styles['Normal']
-normal.font.name = FONT_NAME
 normal.font.size = Pt(12)
-rpr = normal.element.get_or_add_rPr()
-rFonts = rpr.find(qn('w:rFonts'))
-if rFonts is None:
-    rFonts = OxmlElement('w:rFonts')
-    rpr.append(rFonts)
-rFonts.set(qn('w:ascii'), FONT_NAME)
-rFonts.set(qn('w:hAnsi'), FONT_NAME)
-rFonts.set(qn('w:cs'), FONT_NAME)
 
 section0 = doc.sections[0]
 set_section_page_setup(section0)
+add_page_border(section0)
 
 # =========================== COVER PAGE ===========================
 blank(doc, 2)
@@ -140,6 +273,7 @@ centered(doc, "Kudlu Gate, Hosur Road, Bengaluru – 560068", size=14, space_aft
 # =========================== SECTION BREAK: front matter, roman numerals ===========================
 sec_front = doc.add_section(WD_SECTION.NEW_PAGE)
 set_section_page_setup(sec_front)
+add_page_border(sec_front)
 set_page_number_format(sec_front, 'lowerRoman', restart_at=1)
 add_page_number_footer(sec_front)
 
@@ -231,6 +365,7 @@ insert_toc_field(doc)
 # =========================== SECTION BREAK: main body, arabic numerals ===========================
 sec_body = doc.add_section(WD_SECTION.NEW_PAGE)
 set_section_page_setup(sec_body)
+add_page_border(sec_body)
 set_page_number_format(sec_body, 'decimal', restart_at=1)
 add_page_number_footer(sec_body)
 
@@ -255,4 +390,5 @@ for fname in CHAPTER_FILES:
     render_markdown_chapter(doc, path)
 
 doc.save(OUT_PATH)
+purge_theme_fonts_from_docx(OUT_PATH)
 print("Saved:", OUT_PATH)

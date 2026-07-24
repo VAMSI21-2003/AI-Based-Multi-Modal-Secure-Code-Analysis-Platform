@@ -29,33 +29,11 @@ uses exactly the same feature computation as the model's own training and evalua
 
 ### 4.1.2 Component Diagram
 
-**Figure 4.1: High-level system architecture — three-layer separation between the ML core, the FastAPI
-service layer, and the React frontend**
-
-```
- ┌─────────────────────────┐        ┌───────────────────────────────┐
- │   React/TypeScript       │  REST  │        FastAPI backend        │
- │   frontend (Vite)        │◄──────►│  (17 routers, main.py)        │
- │  Scanner / Analysis /    │        │  ┌──────────────────────────┐ │
- │  Recommendations /       │        │  │ ml_bridge.py             │ │
- │  AutoPatch / Dependency- │        │  │  -> app/predictor.py     │ │
- │  Graph / CallGraph-      │        │  │  -> app/utils.py         │ │
- │  Explorer / KnowledgeGraph│       │  └──────────────────────────┘ │
- │  / GitHubMode / PlatformHub│      │  ┌──────────────────────────┐ │
- │  (CI/CD tab)              │      │  │ database.py (SQLite):    │ │
- └─────────────────────────┘        │  │  ScanRecord,             │ │
-                                     │  │  GitHubBatchMeta         │ │
-                                     │  └──────────────────────────┘ │
-                                     │  recommendations.py,           │
-                                     │  auto_patch.py, github_service, │
-                                     │  repo_analysis.py, ci_scan.py   │
-                                     └────────────┬────────────────────┘
-                                                  │ loads once at startup
-                                                  ▼
-                                   models/xgboost.json, random_forest.joblib
-                                   (produced by the offline training pipeline,
-                                    src/ ... -> Chapter 3)
-```
+**Figure 4.1: High-level system architecture — three-layer separation between the ML core, FastAPI, and React**
+(`report/figures/fig_architecture.png`). The frontend talks to the backend only through the REST API;
+`ml_bridge.py` is the only path from the API layer into the shared ML core (`app/predictor.py`,
+`app/utils.py`); and the backend loads the trained model artifacts once at startup rather than per
+request. See Figure 3.1 (Chapter 3.2.1) for how those artifacts are produced.
 
 ## 4.2 Detailed Design (Low-Level Design)
 

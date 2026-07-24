@@ -223,6 +223,8 @@ def add_table_from_markdown(doc, header, rows):
 # ---------------------------------------------------------------------------
 
 FIGURE_IMAGES = {
+    "report/figures/fig_pipeline_offline.png": os.path.join(ROOT, "report", "figures", "fig_pipeline_offline.png"),
+    "report/figures/fig_architecture.png": os.path.join(ROOT, "report", "figures", "fig_architecture.png"),
     "results/model_comparison.png": os.path.join(ROOT, "results", "model_comparison.png"),
     "report/figures/confusion_matrix_xgboost.png": os.path.join(ROOT, "report", "figures", "confusion_matrix_xgboost.png"),
     "report/figures/roc_curve.png": os.path.join(ROOT, "report", "figures", "roc_curve.png"),
