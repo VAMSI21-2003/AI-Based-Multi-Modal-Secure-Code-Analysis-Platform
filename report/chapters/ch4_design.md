@@ -114,28 +114,32 @@ most central to this report's scope:
 - **Scanner** — three input modes (paste/edit via Monaco Editor, batch upload via drag-drop of
   files/folders/zip, and bundled examples), a classifier selector (XGBoost/Random Forest), and a result
   card (verdict, risk badge, probability bar, confidence, model used, a demo-mode warning banner when
-  trained models are unavailable).
+  trained models are unavailable). See Figure 7.5 for a real scan result.
 - **Analysis** — the per-scan deep-dive: verdict and confidence gauges, an "evidence-based risk" banner
   when a deterministic line-pattern scan disagrees with the model in the direction of *more* risk, a
   "Why This Verdict" panel, an approximate feature-contribution chart, an AST/metrics feature radar, a
   PCA scatter plot of the function's CodeBERT embedding against a background of training-set points,
-  and a project-history trend chart.
+  and a project-history trend chart. See Figure 7.6, and Figure 7.7 for the associated line-level
+  heatmap with CWE tagging.
 - **Recommendations** — a rule-based suggested secure rewrite (original vs. suggested diff), best
   -practice tip cards, and a separate, explicitly-labeled-heuristic "Performance & Efficiency
   Suggestions" section (loop-invariant calls, string growth in loops, heap allocation in loops, etc.)
-  that is presented apart from the vulnerability score.
+  that is presented apart from the vulnerability score. See Figure 7.8 (rewrite) and Figure 7.9
+  (performance panel with real findings).
 - **AutoPatch** — detected vs. reference patch cards with a before/after diff viewer and, when a safe
   automated rewrite is possible, an "Apply & Re-scan" action that creates a linked derived scan and
-  reports the honest before/after verdict comparison.
+  reports the honest before/after verdict comparison. See Figure 7.10.
 - **DependencyGraph / CallGraphExplorer / KnowledgeGraph** — whole-project visualizations built with
   `@xyflow/react` and `dagre` layout: a file-level `#include` graph, a searchable cross-file
   function-call graph (with dangerous-call-chain highlighting), and a unified graph combining 11 node
-  kinds (files, functions, CWE entries, dangerous APIs, pointers, buffers, predictions, etc.).
+  kinds (files, functions, CWE entries, dangerous APIs, pointers, buffers, predictions, etc.). See
+  Figure 7.11 for a real cross-file call graph.
 - **GitHubMode** — scans a public GitHub URL by shallow-cloning recent commits, scanning every file
   through the same pipeline, and deleting the local clone afterward; explicitly reports scan scope
   (files detected/analyzed/skipped and why).
 - **PlatformHub (CI/CD tab)** — surfaces the same CI/CD pipeline described in Section 4.5 and
-  `docs/CI_CD.md`, including a "run it locally" panel.
+  `docs/CI_CD.md`, including a "run it locally" panel. See Figure 7.12 for a real GitHub Actions run of
+  this pipeline.
 
 ### 4.3.2 API Design
 
