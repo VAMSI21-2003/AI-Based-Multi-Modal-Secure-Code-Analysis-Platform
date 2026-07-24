@@ -22,13 +22,15 @@ about independently:
 3. **`frontend/` — the React/TypeScript presentation layer.** Consumes the backend's REST API and
    presents it across purpose-built pages, described in Section 4.4.
 
-Figure 4.1 (screenshot/diagram placeholder — see Chapter 7.5) shows this layering; the key design
-principle is that the trained model and its feature-extraction code are never duplicated between the
-offline training pipeline and the online serving path — both call the same `app/` functions, so a
-prediction made through the web application uses exactly the same feature computation as the model's
-own training and evaluation.
+Figure 4.1 (Section 4.1.2) shows this layering; the key design principle is that the trained model and
+its feature-extraction code are never duplicated between the offline training pipeline and the online
+serving path — both call the same `app/` functions, so a prediction made through the web application
+uses exactly the same feature computation as the model's own training and evaluation.
 
 ### 4.1.2 Component Diagram
+
+**Figure 4.1: High-level system architecture — three-layer separation between the ML core, the FastAPI
+service layer, and the React frontend**
 
 ```
  ┌─────────────────────────┐        ┌───────────────────────────────┐
@@ -155,6 +157,8 @@ dependency-graph`, `GET /api/project/{batch_id}/knowledge-graph`. CORS is config
 ## 4.4 Module Description
 
 ### 4.4.1 Description of Each Module
+
+**Table 4.1: Backend module responsibilities**
 
 | Module | Responsibility |
 |---|---|

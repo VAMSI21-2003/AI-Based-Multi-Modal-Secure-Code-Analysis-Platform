@@ -124,6 +124,8 @@ split, on each of seven feature subsets: CodeBERT-only, AST-only, metrics-only, 
 combination, and the full 792-feature fusion. The results are reported honestly rather than framed to
 favor the project's own design choice:
 
+**Table 3.1: Modality-ablation results — same split, same XGBoost hyperparameters, feature subset varied**
+
 | Feature subset | # Features | F1 | AUC-ROC |
 |---|---|---|---|
 | AST only | 11 | 0.4939 | 0.5757 |

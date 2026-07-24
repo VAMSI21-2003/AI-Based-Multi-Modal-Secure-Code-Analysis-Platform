@@ -98,6 +98,8 @@ multi-user authentication layer) rather than a multi-tenant production security 
 
 ### 1.6.1 Software Specifications
 
+**Table 1.1: Software stack and verified versions**
+
 | Layer | Technology | Verified version (from the repository's own dependency manifests) |
 |---|---|---|
 | ML pipeline | Python | 3.11 (CI) / 3.13 (development) |

@@ -115,6 +115,8 @@ Drawing the above together, three gaps motivate this project's design:
 
 ## 2.4 Comparison of Different Approaches
 
+**Table 2.1: Comparison of prior approaches against this project**
+
 | Approach | Representation | Reported metric (as published) | Relationship to this project |
 |---|---|---|---|
 | Static analysis (Coverity) — Bessey et al. (2010) | Hand-written rules, dataflow/taint analysis | Not reported as a single F1/accuracy figure; evaluated qualitatively at industrial scale | Motivates the need for a learning-based approach; not directly comparable numerically |

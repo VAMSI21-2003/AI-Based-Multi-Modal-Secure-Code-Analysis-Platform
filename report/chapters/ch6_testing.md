@@ -38,6 +38,8 @@ The full backend/root suite was executed for this report on 2026-07-24 via `pyte
 tests`, and the frontend suite via `vitest run`. All results below are the actual, real output of that
 run — not illustrative.
 
+**Table 6.1: Sample test cases with expected vs. actual results**
+
 | # | Test case | Expected result | Actual result |
 |---|---|---|---|
 | 1 | `test_ast_features_have_exactly_11_dimensions` | AST feature vector has exactly 11 keys | Passed |
@@ -56,7 +58,7 @@ run — not illustrative.
 | 14 | `test_cross_table_label_mismatch_is_detected_and_raises` | A deliberately mismatched label across tables raises an error instead of silently fusing | Passed |
 | 15 | `renders the real fetched stats, not fabricated data` (Dashboard.test.tsx) | Dashboard shows live API data, not placeholder values | Passed |
 
-**Full suite totals (real, from this run):**
+**Table 6.2: Full test suite totals (real, from this run)**
 
 | Suite | Test files | Tests | Passed | Failed |
 |---|---|---|---|---|

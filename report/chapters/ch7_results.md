@@ -16,6 +16,8 @@ the committed artifacts rather than being stale or manually edited.
 
 ### 7.1.2 Model Hyperparameters
 
+**Table 7.1: Model hyperparameters and training configuration**
+
 | Model | Hyperparameters |
 |---|---|
 | XGBoost | `n_estimators=100`, `max_depth=6`, `learning_rate=0.1`, `scale_pos_weight` set from the training split's class ratio |
@@ -26,6 +28,8 @@ the committed artifacts rather than being stale or manually edited.
 ## 7.2 Model Performance Analysis
 
 ### 7.2.1 Final Results
+
+**Table 7.2: Final test-set results, XGBoost vs. Random Forest**
 
 | Metric | Random Forest | XGBoost |
 |---|---|---|
@@ -40,7 +44,7 @@ XGBoost outperforms Random Forest on every metric and is the model selected for 
 default classifier (Chapter 3.4.1). Figure 7.1 shows the side-by-side comparison chart
 (`results/model_comparison.png`, regenerated 2026-07-21, same day as the correction described below).
 
-**Confusion matrix (XGBoost, test set, n=5,447):**
+**Table 7.3: Confusion matrix (XGBoost, test set, n=5,447)**
 
 | | Predicted Safe | Predicted Vulnerable |
 |---|---|---|
@@ -69,6 +73,8 @@ test set, which is a genuine capability limit, not a symptom of overfitting the 
 Beyond the two production models, the modality-ablation experiment (Chapter 3.4.3) trained the same
 XGBoost configuration on each individual and paired feature subset, giving a broader comparison than
 Random-Forest-vs-XGBoost alone:
+
+**Table 7.4: Modality-ablation results, restated from Chapter 3.4.3 for direct comparison**
 
 | Subset | F1 | AUC-ROC |
 |---|---|---|
