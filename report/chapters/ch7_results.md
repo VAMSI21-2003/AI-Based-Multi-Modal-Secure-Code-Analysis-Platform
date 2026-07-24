@@ -130,18 +130,23 @@ uncorrected pipeline produced.
 
 ## 7.4 Visualization of Results
 
-- **Figure 7.1** — `results/model_comparison.png`: Random Forest vs. XGBoost across accuracy,
-  precision, recall, and F1 (regenerated 2026-07-21 from the corrected models; verified in this report
-  to match `training_metadata.json` exactly).
-- **Figure 7.2** — `report/figures/confusion_matrix_xgboost.png`: XGBoost's test-set confusion matrix.
-- **Figure 7.3** — `report/figures/roc_curve.png`: ROC curves for both models, generated in this report
-  by reloading the real committed model artifacts and reproducing the production train/test split.
-- **Figure 7.4** — `results/feature_importance.png`: Top-20 Random Forest feature importances, colored
-  by branch (AST/metrics/CodeBERT). `blank_lines` and `avg_line_length` (software metrics) and
-  `n_total_nodes` (AST) outrank any individual CodeBERT embedding dimension, though the 768 embedding
-  dimensions collectively account for the majority of total model reliance simply by virtue of their
-  number — consistent with the modality-ablation finding that CodeBERT carries the largest single-branch
-  signal (Chapter 3.4.3/7.2.3).
+**Figure 7.1: Random Forest vs. XGBoost across accuracy, precision, recall, and F1**
+(`results/model_comparison.png`). Regenerated 2026-07-21 from the corrected models; verified in this
+report to match `training_metadata.json` exactly.
+
+**Figure 7.2: XGBoost confusion matrix, test set**
+(`report/figures/confusion_matrix_xgboost.png`). Visualizes the matrix in Table 7.3.
+
+**Figure 7.3: ROC curves for both models**
+(`report/figures/roc_curve.png`). Generated in this report by reloading the real committed model
+artifacts and reproducing the production train/test split — not simulated.
+
+**Figure 7.4: Top-20 Random Forest feature importances, colored by branch (AST/metrics/CodeBERT)**
+(`results/feature_importance.png`). `blank_lines` and `avg_line_length` (software metrics) and
+`n_total_nodes` (AST) outrank any individual CodeBERT embedding dimension, though the 768 embedding
+dimensions collectively account for the majority of total model reliance simply by virtue of their
+number — consistent with the modality-ablation finding that CodeBERT carries the largest single-branch
+signal (Chapter 3.4.3/7.2.3).
 
 ## 7.5 Screenshots of Working System
 

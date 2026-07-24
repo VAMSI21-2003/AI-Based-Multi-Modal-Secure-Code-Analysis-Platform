@@ -5,9 +5,15 @@ re-derive Phases 1–4; read this file plus `report/FORMAT_SPEC.md` first.
 
 Progress: Phase 1 (format) ✅ · Phase 2 (app inventory) ✅ · Phase 3–4 (dataset/model/results
 verification) ✅ · Phase 5 (this blueprint) ✅ · Phase 6 (write content) ✅ — all 8 chapters +
-references drafted in `report/chapters/` (ch1_introduction.md … ch8_conclusion.md, references.md) ·
-Phase 7 (screenshots) — NOT STARTED · Phase 8 (consistency audit) — NOT STARTED ·
-Phase 9 (final DOCX assembly) — NOT STARTED.
+references drafted in `report/chapters/` · Phase 7 (screenshots) ✅ — 8 real screenshots in
+`report/figures/screenshots/` · Phase 8 (consistency audit) ✅ — see `report/PHASE8_AUDIT.md` ·
+Phase 9 (final DOCX assembly) ✅ — **`report/Final_Report.docx`** (also exported to
+`report/Final_Report.pdf` for review), built by `report/assemble_docx.py` + `report/build_report.py`.
+
+**Remaining before submission — fill in these placeholders and re-run `python
+report/assemble_docx.py`**: student name, USN, guide name/designation, submission month/year, viva
+date. Search the DOCX for `REQUIRES VERIFICATION` to find every one, or edit the placeholder constants
+at the top of `report/build_report.py`.
 
 Also produced during Phase 6/7 prep: `report/figures/confusion_matrix_xgboost.png` and
 `report/figures/roc_curve.png`, generated from the real committed model artifacts (reproduced the
