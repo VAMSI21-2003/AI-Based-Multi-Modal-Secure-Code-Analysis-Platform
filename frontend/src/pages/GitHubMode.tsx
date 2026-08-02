@@ -10,9 +10,10 @@ import StatCard from "../components/StatCard";
 import Gauge from "../components/Gauge";
 import { Spinner } from "../components/Loading";
 import {
-  scanGitHubRepo, getProjectSummary, getGitHubCommits, getGitHubBatchMeta, downloadBatchPdf,
-  type ProjectSummary, type GitHubCommit, type GitHubBatchMeta,
+  scanGitHubRepo, pollScanJob, getProjectSummary, getGitHubCommits, getGitHubBatchMeta, downloadBatchPdf,
+  type ProjectSummary, type GitHubCommit, type GitHubBatchMeta, type ScanJob,
 } from "../api/client";
+import ProgressBar from "../components/ProgressBar";
 import { RISK_HEX, timeAgo } from "../utils/risk";
 
 export default function GitHubMode() {
@@ -23,6 +24,7 @@ export default function GitHubMode() {
   const [url, setUrl] = useState("");
   const [name, setName] = useState("");
   const [scanning, setScanning] = useState(false);
+  const [scanJob, setScanJob] = useState<ScanJob | null>(null);
 
   const [summary, setSummary] = useState<ProjectSummary | null>(null);
   const [commits, setCommits] = useState<GitHubCommit[] | null>(null);
@@ -46,14 +48,17 @@ export default function GitHubMode() {
   const onScan = async () => {
     if (!url.trim()) { toast.error("Enter a GitHub repository URL"); return; }
     setScanning(true);
+    setScanJob(null);
     try {
-      const r = await scanGitHubRepo(url.trim(), name.trim() || undefined);
-      toast.success(`Cloned & scanned ${r.files_scanned} file(s)`);
-      navigate(`/github-mode?batch=${r.batch_id}`);
+      const submitted = await scanGitHubRepo(url.trim(), name.trim() || undefined);
+      const job = await pollScanJob(submitted.batch_id, setScanJob);
+      toast.success(`Cloned & scanned ${job.result.files_scanned} file(s)`);
+      navigate(`/github-mode?batch=${job.batch_id}`);
     } catch (e: any) {
       toast.error(e?.response?.data?.detail || e.message || "Failed to clone/scan repository");
     } finally {
       setScanning(false);
+      setScanJob(null);
     }
   };
 
@@ -79,9 +84,21 @@ export default function GitHubMode() {
               onClick={onScan} disabled={scanning}
               className="inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-lg bg-(--accent) text-white text-sm font-semibold hover:brightness-110 disabled:opacity-50"
             >
-              <GitFork size={15} /> {scanning ? "Cloning & scanning..." : "Scan Repository"}
+              <GitFork size={15} />
+              {!scanning ? "Scan Repository"
+                : !scanJob || scanJob.status === "queued" ? "Cloning repository..."
+                : scanJob.files_total === 0 ? "Detecting scannable files..."
+                : `Scanning — ${scanJob.files_completed}/${scanJob.files_total} files`}
             </button>
           </div>
+          {scanning && scanJob && scanJob.files_total > 0 && (
+            <div className="mt-4">
+              <ProgressBar
+                value={(scanJob.files_completed / scanJob.files_total) * 100}
+                label={`Scanning — ${scanJob.files_completed}/${scanJob.files_total} files scanned`}
+              />
+            </div>
+          )}
           <div className="text-xs text-(--text-muted) mt-3">Only plain http(s) git URLs are accepted (public repositories). Only text is read — nothing in the repository is ever executed.</div>
         </ChartCard>
       </PageShell>

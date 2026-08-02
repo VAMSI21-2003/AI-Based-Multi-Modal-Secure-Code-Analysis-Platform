@@ -5,19 +5,19 @@ export const api = axios.create({
   timeout: 120000,
 });
 
-// Scan-triggering calls (single-file, batch/ZIP/folder, GitHub, live) can
-// legitimately run for minutes on a large real-world repo, well past the
-// 120s default above. Configurable via VITE_SCAN_TIMEOUT_MS so this can be
-// tuned per deployment without a code change; defaults to 20 minutes --
-// bumped from 10 min after per-function inference
-// (docs/PER_FUNCTION_INFERENCE_DESIGN.md) measured a real 200-file GitHub
-// scan (curl) at 797.5s server-side, already past the old 10-minute default.
+// Single-file paste/live scans (POST /scan/code, /scan/live) are one
+// blocking request -- correctly so, they're fast (seconds) and don't need
+// the async job machinery below. Configurable via VITE_SCAN_TIMEOUT_MS,
+// defaults to 20 minutes (generous headroom, not a realistic expectation).
 //
-// This is a stopgap, not the real fix: a long-running scan is still one
-// blocking HTTP request that ties up a connection and gives no progress
-// feedback. The proper fix is an async job (submit -> poll status/progress
-// -> fetch result when done) instead of one long request -- out of scope
-// for this change.
+// Batch/ZIP/folder and GitHub scans used to share this same long-timeout,
+// one-blocking-request pattern -- documented here as a stopgap, since a
+// 200-file scan could take ~13 minutes server-side
+// (docs/PER_FUNCTION_INFERENCE_DESIGN.md) and, worse, froze the entire
+// backend for every user for that whole duration (docs/ASYNC_SCAN_DESIGN.md
+// Sec 2). That's now fixed: scanBatch/scanGitHubRepo below return a job id
+// almost immediately, and pollScanJob polls GET /api/scan/jobs/{batch_id}
+// for real progress instead.
 const SCAN_TIMEOUT_MS = Number(import.meta.env.VITE_SCAN_TIMEOUT_MS) || 1_200_000;
 
 // ── Types ────────────────────────────────────────────────────────────────
@@ -105,6 +105,27 @@ export interface BatchResult {
   results: ScanResult[];
 }
 
+// Async batch/GitHub scan job (docs/ASYNC_SCAN_DESIGN.md). `result` is
+// BatchResult-shaped for a "batch" job once status is "succeeded"; for a
+// "github" job it's GitHubScanResult-shaped (declared further below,
+// alongside the rest of GitHub Mode's types) -- typed `any` here rather
+// than a union, since callers already know which kind they submitted and
+// cast accordingly (see scanBatch/scanGitHubRepo callers in
+// Scanner.tsx/GitHubMode.tsx).
+export interface ScanJob {
+  batch_id: string;
+  kind: "batch" | "github";
+  status: "queued" | "running" | "succeeded" | "failed";
+  files_total: number;
+  files_completed: number;
+  files_failed: number;
+  error: string | null;
+  created_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+  result: any | null;
+}
+
 export interface KnowledgeEntry {
   id: string;
   name: string;
@@ -128,18 +149,50 @@ export const scanCode = (payload: {
   code: string; project_name?: string; filename?: string; model_choice?: string; source?: string;
 }) => api.post<ScanResult>("/scan/code", payload, { timeout: SCAN_TIMEOUT_MS }).then((r) => r.data);
 
-export const scanBatch = (files: File[], project_name: string, model_choice: string, onProgress?: (pct: number) => void) => {
+// Submits the batch and returns almost immediately with a job id
+// (docs/ASYNC_SCAN_DESIGN.md) -- the actual per-file scanning happens
+// server-side in the background. onUploadProgress tracks the (fast, local)
+// file-upload transfer only, not scan progress; pass the returned batch_id
+// to pollScanJob for real files_completed/files_total scan progress.
+export const scanBatch = (files: File[], project_name: string, model_choice: string, onUploadProgress?: (pct: number) => void) => {
   const form = new FormData();
   form.append("project_name", project_name);
   form.append("model_choice", model_choice);
   files.forEach((f) => form.append("files", f, (f as any).webkitRelativePath || f.name));
-  return api.post<BatchResult>("/scan/batch", form, {
+  return api.post<{ batch_id: string; status: string; files_total: number }>("/scan/batch", form, {
     headers: { "Content-Type": "multipart/form-data" },
-    timeout: SCAN_TIMEOUT_MS,
     onUploadProgress: (evt) => {
-      if (onProgress && evt.total) onProgress(Math.round((evt.loaded / evt.total) * 100));
+      if (onUploadProgress && evt.total) onUploadProgress(Math.round((evt.loaded / evt.total) * 100));
     },
   }).then((r) => r.data);
+};
+
+export const getScanJob = (batchId: string) => api.get<ScanJob>(`/scan/jobs/${batchId}`).then((r) => r.data);
+
+const JOB_POLL_MS = 1500;
+
+// Polls GET /api/scan/jobs/{batch_id} until the job reaches a terminal
+// state -- shared by both scanBatch and scanGitHubRepo callers, same
+// setInterval-free recursive-setTimeout pattern WatchMode.tsx's polling
+// already uses elsewhere in this codebase. Resolves with the final job
+// (status "succeeded") or rejects with an Error carrying the job's error
+// message (status "failed"). onProgress fires on every poll, including
+// "queued"/"running" ticks, so callers can render files_completed/
+// files_total as it changes.
+export const pollScanJob = (batchId: string, onProgress?: (job: ScanJob) => void): Promise<ScanJob> => {
+  return new Promise((resolve, reject) => {
+    const tick = () => {
+      getScanJob(batchId)
+        .then((job) => {
+          onProgress?.(job);
+          if (job.status === "succeeded") resolve(job);
+          else if (job.status === "failed") reject(new Error(job.error || "Scan job failed"));
+          else setTimeout(tick, JOB_POLL_MS);
+        })
+        .catch(reject);
+    };
+    tick();
+  });
 };
 
 export const getScan = (id: string) => api.get<ScanResult>(`/scan/${id}`).then((r) => r.data);
@@ -397,8 +450,12 @@ export interface GitHubScanResult {
 }
 export interface GitHubCommit { hash: string; author: string; date: string; message: string; }
 
+// Returns almost immediately with a job id (docs/ASYNC_SCAN_DESIGN.md) --
+// clone + scan happens server-side in the background. Poll the returned
+// batch_id via pollScanJob for progress; job.result is GitHubScanResult-
+// shaped once status is "succeeded".
 export const scanGitHubRepo = (repoUrl: string, projectName?: string) =>
-  api.post<GitHubScanResult>("/github/scan", { repo_url: repoUrl, project_name: projectName || undefined }, { timeout: SCAN_TIMEOUT_MS }).then((r) => r.data);
+  api.post<{ batch_id: string; status: string }>("/github/scan", { repo_url: repoUrl, project_name: projectName || undefined }).then((r) => r.data);
 
 export interface GitHubBatchMeta {
   batch_id: string; repo_url: string; repo_name: string; branch: string | null; commit_sha: string | null;

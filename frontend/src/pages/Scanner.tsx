@@ -11,7 +11,7 @@ import CodeEditor from "../components/CodeEditor";
 import RiskBadge, { VerdictPill } from "../components/RiskBadge";
 import ProgressBar from "../components/ProgressBar";
 import { EXAMPLES } from "../data/examples";
-import { scanCode, scanBatch, downloadBatchPdf, type ScanResult, type BatchResult } from "../api/client";
+import { scanCode, scanBatch, pollScanJob, downloadBatchPdf, type ScanResult, type BatchResult, type ScanJob } from "../api/client";
 import { getDefaultModel } from "../utils/settings";
 
 type Mode = "paste" | "batch" | "examples";
@@ -33,7 +33,8 @@ export default function Scanner() {
   const [error, setError] = useState<string | null>(null);
 
   const [files, setFiles] = useState<File[]>([]);
-  const [batchProgress, setBatchProgress] = useState(0);
+  const [uploadProgress, setUploadProgress] = useState(0);
+  const [batchJob, setBatchJob] = useState<ScanJob | null>(null);
   const [batchScanning, setBatchScanning] = useState(false);
   const [batchResult, setBatchResult] = useState<BatchResult | null>(null);
   const [dragOver, setDragOver] = useState(false);
@@ -72,11 +73,14 @@ export default function Scanner() {
   const runBatchScan = async () => {
     if (!files.length) return;
     setBatchScanning(true);
-    setBatchProgress(0);
+    setUploadProgress(0);
+    setBatchJob(null);
     setBatchResult(null);
     setError(null);
     try {
-      const r = await scanBatch(files, projectName, modelChoice, setBatchProgress);
+      const submitted = await scanBatch(files, projectName, modelChoice, setUploadProgress);
+      const job = await pollScanJob(submitted.batch_id, setBatchJob);
+      const r = job.result as BatchResult;
       setBatchResult(r);
       toast.success(`Scanned ${r.total_files_scanned} file(s) — ${r.vulnerable_count} vulnerable`);
     } catch (e: any) {
@@ -275,7 +279,18 @@ export default function Scanner() {
                   ))}
                 </div>
 
-                {batchScanning && <div className="mt-4"><ProgressBar value={batchProgress} label="Uploading & scanning" /></div>}
+                {batchScanning && (
+                  <div className="mt-4">
+                    {!batchJob ? (
+                      <ProgressBar value={uploadProgress} label="Uploading files" />
+                    ) : (
+                      <ProgressBar
+                        value={batchJob.files_total > 0 ? (batchJob.files_completed / batchJob.files_total) * 100 : 0}
+                        label={`Scanning — ${batchJob.files_completed}/${batchJob.files_total} files scanned`}
+                      />
+                    )}
+                  </div>
+                )}
 
                 <button
                   onClick={runBatchScan}
