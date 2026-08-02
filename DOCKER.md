@@ -57,3 +57,31 @@ shrink without removing functionality.
 docker compose up --build backend    # after editing anything in backend/ or app/
 docker compose up --build frontend   # after editing anything in frontend/src
 ```
+
+## Known-bug note: "import_decimal.default is not a constructor"
+
+A prior session hit this error in the browser console on the Analysis
+route of the nginx-served production build (never on `npm run dev`). It
+was never root-caused at the time. Re-investigated 2026-08-02 with a
+genuinely clean rebuild (`docker compose down` + `docker compose up
+--build`, no cached layers reused for the frontend `npm ci`/`vite build`
+steps) and it did **not** reproduce: the PCA scatter plot (recharts +
+its `decimal.js-light` dependency, the likely source given the error
+text) rendered correctly across a fresh page load, hover/tooltip
+interaction, and a hard F5 reload, with all 82 JS chunks loading 200/304
+and zero console errors.
+
+This session's `react-router-dom` 7.18.1 -> 7.18.2 bump (see the
+adjacent commit) does not explain it -- the bug also failed to reproduce
+in an *earlier* rebuild this same session, before that bump was made.
+No source change was needed to make it go away. The most likely
+explanation is that the original occurrence was a stale/corrupted
+Docker build-cache layer (e.g. an inconsistent `npm ci` layer or a
+corrupted esbuild/Rollup chunk from an interrupted prior build) rather
+than an actual code defect -- `docker compose up` without `--build` can
+still serve an old image indefinitely if one exists, so a bad one-off
+build could persist across many sessions until someone forces a clean
+rebuild. If this resurfaces, get the full browser console stack trace
+immediately (before trying anything else) and check whether it survives
+a `docker compose down && docker compose up --build` before assuming
+it's a real regression.
