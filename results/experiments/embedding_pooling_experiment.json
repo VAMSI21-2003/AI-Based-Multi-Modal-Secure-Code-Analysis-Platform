@@ -1,0 +1,19 @@
+{
+  "part1_reverify_cls_anisotropy": {
+    "sample_size": 500,
+    "random_state": 42,
+    "cls_mean_pairwise_cosine_similarity": 0.984,
+    "previously_reported_figure": 0.9833,
+    "difference": 0.0007
+  },
+  "part2_meanpool_comparison": {
+    "meanpool_mean_pairwise_cosine_similarity": 0.9642,
+    "reduction_vs_cls": 0.0198,
+    "meaningful_drop_threshold": 0.03,
+    "meaningful": false
+  },
+  "part3_retrain": {
+    "ran": false,
+    "reason": "mean-pooling did not meaningfully reduce anisotropy"
+  }
+}
