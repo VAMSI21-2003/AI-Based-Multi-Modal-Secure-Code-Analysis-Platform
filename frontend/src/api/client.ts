@@ -1,7 +1,16 @@
 import axios from "axios";
 
+// Split-origin deployment (e.g. Vercel-hosted frontend + Render-hosted
+// backend) has no same-origin reverse proxy to forward relative /api/*
+// requests to, unlike the Vite dev server (vite.config.ts's proxy) and the
+// Docker Compose stack (frontend/nginx.conf's proxy_pass) -- both of which
+// this empty-string default preserves unchanged. Set at build time; must be
+// the backend's origin with NO trailing slash (e.g.
+// "https://securecode-ai-backend.onrender.com").
+const API_BASE = import.meta.env.VITE_API_BASE_URL || "";
+
 export const api = axios.create({
-  baseURL: "/api",
+  baseURL: `${API_BASE}/api`,
   timeout: 120000,
 });
 
@@ -502,17 +511,17 @@ export const getBatches = () => api.get("/scan/batches/list").then((r) => r.data
   batch_id: string; project_name: string; total_files: number; vulnerable_files: number; created_at: string;
 }[]);
 
-export const downloadScanPdf = (id: string) => `/api/report/pdf/${id}`;
-export const downloadExecutivePdf = (id: string) => `/api/export/pdf/executive/${id}`;
-export const downloadDeveloperPdf = (id: string) => `/api/export/pdf/developer/${id}`;
-export const downloadHtmlReport = (id: string) => `/api/export/html/${id}`;
-export const downloadResearchPdf = () => `/api/export/pdf/research`;
-export const downloadWordReport = (id: string) => `/api/export/docx/${id}`;
-export const downloadPptxReport = (id: string) => `/api/export/pptx/${id}`;
-export const downloadBatchPdf = (batchId: string) => `/api/report/pdf/batch/${batchId}`;
+export const downloadScanPdf = (id: string) => `${API_BASE}/api/report/pdf/${id}`;
+export const downloadExecutivePdf = (id: string) => `${API_BASE}/api/export/pdf/executive/${id}`;
+export const downloadDeveloperPdf = (id: string) => `${API_BASE}/api/export/pdf/developer/${id}`;
+export const downloadHtmlReport = (id: string) => `${API_BASE}/api/export/html/${id}`;
+export const downloadResearchPdf = () => `${API_BASE}/api/export/pdf/research`;
+export const downloadWordReport = (id: string) => `${API_BASE}/api/export/docx/${id}`;
+export const downloadPptxReport = (id: string) => `${API_BASE}/api/export/pptx/${id}`;
+export const downloadBatchPdf = (batchId: string) => `${API_BASE}/api/report/pdf/batch/${batchId}`;
 export const exportHistoryUrl = (format: "csv" | "json", params: Record<string, any> = {}) => {
   const qs = new URLSearchParams({ format, ...params }).toString();
-  return `/api/history/export?${qs}`;
+  return `${API_BASE}/api/history/export?${qs}`;
 };
 
 // ── Security Gamification (Phase 3, #17) ──────────────────────────────────────
@@ -542,8 +551,8 @@ export const getCodeHealth = () => api.get<CodeHealth>("/analytics/code-health")
 
 // ── Enterprise PDF Report ─────────────────────────────────────────────────────
 
-export const downloadEnterprisePdf = (scanId: string) => `/api/export/pdf/enterprise/${scanId}`;
-export const downloadEnterpriseProjectPdf = (batchId: string) => `/api/export/pdf/enterprise-project/${batchId}`;
+export const downloadEnterprisePdf = (scanId: string) => `${API_BASE}/api/export/pdf/enterprise/${scanId}`;
+export const downloadEnterpriseProjectPdf = (batchId: string) => `${API_BASE}/api/export/pdf/enterprise-project/${batchId}`;
 
 // ── Live Monaco IDE (no-persist live analysis) ────────────────────────────────
 

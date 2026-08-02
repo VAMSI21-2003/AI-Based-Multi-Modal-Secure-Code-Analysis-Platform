@@ -1,0 +1,51 @@
+# =============================================================================
+# backend/Dockerfile.render -- free-tier variant for Render.com's 512MB-RAM
+# free web service plan. See docs/FREE_TIER_DEPLOYMENT.md for the measured
+# memory numbers behind every difference from backend/Dockerfile:
+#
+#   - requirements-lite.txt (no torch/transformers): measured 347MB RSS
+#     with XGBoost + Random Forest loaded and a real prediction run, vs.
+#     835MB with CodeBERT also loaded -- the latter does not fit in 512MB.
+#     app/predictor.py already has a real, working fallback for this
+#     (zero-vector embedding, real trained-model verdict on AST+Metrics
+#     only) -- no application code changes needed.
+#   - dataset/processed/*.csv (243MB + 54MB) are NOT copied in. Both
+#     consumers (ml_bridge._feature_baseline(), analytics._dataset_stats_cached())
+#     already check os.path.exists() and degrade to "not available" --
+#     confirmed by reading both call sites, not assumed.
+#
+# Build context is still the PROJECT ROOT, same reason as backend/Dockerfile
+# (imports app/ and models/ as siblings of backend/):
+#
+#   docker build -f backend/Dockerfile.render -t securecode-ai-backend-lite .
+# =============================================================================
+
+FROM python:3.11-slim
+
+# git: required for GitHub Mode (git clone). build-essential: required to
+# build a couple of native wheels on some platforms.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /srv
+
+COPY backend/requirements-lite.txt ./backend/requirements-lite.txt
+RUN pip install --no-cache-dir -r backend/requirements-lite.txt
+
+# The existing, unmodified ML pipeline + trained weights. No dataset/
+# CSVs -- see header comment above.
+COPY app/ ./app/
+COPY models/ ./models/
+
+# The web API layer (this Phase 1-4 platform work).
+COPY backend/ ./backend/
+
+WORKDIR /srv/backend
+ENV PYTHONUNBUFFERED=1
+EXPOSE 8000
+
+# Single worker (default) -- Render free tier is single-instance/single-CPU
+# anyway, and a second uvicorn worker would roughly double the ~347MB
+# baseline, eating most of the remaining headroom under 512MB.
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
