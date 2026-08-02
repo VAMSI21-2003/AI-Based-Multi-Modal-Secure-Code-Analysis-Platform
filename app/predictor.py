@@ -321,12 +321,26 @@ def extract_codebert_embeddings_batch(codes: list, tokenizer, model, batch_size:
         try:
             import torch
 
+            # padding=True (pad to the longest item IN THIS CHUNK) instead of
+            # padding="max_length" (pad every item to a full 512 regardless
+            # of actual length) -- docs/ASYNC_SCAN_DESIGN.md Sec 4: the
+            # median function is ~260 of 512 tokens
+            # (docs/PER_FUNCTION_INFERENCE_DESIGN.md), so roughly half of
+            # every chunk's compute was spent on padding tokens that
+            # contribute nothing (the attention mask already excludes them
+            # from the [CLS] output either way). Verified numerically
+            # equivalent to padding="max_length" before this change shipped
+            # -- src/model/verify_dynamic_padding.py, run against this exact
+            # function, unmodified: max abs diff 0.0 for batches containing
+            # a truncated (512-token) item, ~1e-6 (float32 precision noise,
+            # not a systematic difference) for all-short batches, both well
+            # under the 1e-5 tolerance used to judge equivalence.
             inputs = tokenizer(
                 chunk,
                 return_tensors="pt",
                 max_length=512,
                 truncation=True,
-                padding="max_length",
+                padding=True,
             )
             with torch.no_grad():
                 output = model(**inputs)

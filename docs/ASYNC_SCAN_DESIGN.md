@@ -449,3 +449,85 @@ cleanly. The batch-upload live-browser test (Phase C) additionally
 confirmed end-to-end correctness on real files: 2 test files uploaded,
 both correctly flagged vulnerable (a `strcpy` overflow and an off-by-one
 array write), 0 skipped.
+
+## 10. Phase E: dynamic-padding speed optimization (separate follow-up phase)
+
+Deferred from the async work above per explicit sequencing instruction
+("only after that's committed and verified"). §4's dynamic-padding fix —
+`extract_codebert_embeddings_batch()`'s tokenizer call,
+`app/predictor.py:329`, `padding="max_length"` → `padding=True` — implemented
+after empirical equivalence verification, per instruction: if the two
+padding strategies produced numerically different `[CLS]` embeddings, stop
+and report back rather than deciding unilaterally whether the difference
+was acceptable.
+
+### Equivalence verification (before touching `app/predictor.py`)
+
+`src/model/verify_dynamic_padding.py` — a new, standalone, read-only script
+that loads the real production tokenizer/model (via `ml_bridge.get_codebert()`,
+the same path `app/predictor.py` itself uses) and independently compares
+both padding strategies across four cases, without modifying any file:
+
+| Test | Scenario | Max abs diff | `allclose` (atol=1e-5) |
+|---|---|---|---|
+| 1 | Batch of only short functions (the main case this optimization targets) | 3.81e-06 | **True** |
+| 2 | Mixed batch (short + medium + one item truncated to 512) | **0.0 (bit-identical)** | **True** |
+| 3 | Single-item batch (batch_size=1 edge case) | 1.91e-06 | **True** |
+| 4 | Production `extract_codebert_embeddings_batch()` (unmodified) vs. manual `padding=True` | 0.0 (bit-identical, batch included a truncated item) | **True** |
+
+Test 2/4's exact bit-identical result is expected and mechanically
+explained, not a coincidence: when a batch contains an item truncated to
+the full 512 tokens, `padding=True` pads every item in that batch to 512
+too — identical computation to `padding="max_length"` in that specific
+case. Test 1's non-zero-but-tiny difference (~1e-6, no systematic bias) is
+ordinary float32 precision noise from different tensor shapes feeding
+attention/layernorm — exactly what the design doc predicted ("mathematically
+identical `[CLS]` output... the attention mask already excludes pad
+positions"), confirmed empirically rather than assumed. All four cases
+passed the 1e-5 equivalence bar — verdict: **safe to ship**, not stopped.
+
+### Fix applied and verified
+
+`app/predictor.py:329` changed, `backend/tests` full suite re-run:
+**107/107 passed** (same count as before — no regression, including the
+threshold-sensitive tests in `test_ml_pipeline.py` that would catch a
+verdict flip from a borderline-probability shift).
+
+### Real-world speedup — honest numbers, not a hopeful one
+
+Two very different results depending on workload, both real and both
+reported:
+
+- **Backend test suite wall-clock**: 108-112s (pre-fix, measured across
+  Phases A-D) → **33.8s (post-fix)** — roughly **3.2x faster**. The suite's
+  fixtures are mostly short synthetic snippets (a few lines each), the
+  exact profile this optimization targets most directly.
+- **Real repo re-scan, same exact workload as Phase D's live demo**
+  (`curl/curl`, 200 files, identical file cap): **894.1s (pre-fix) → 864.6s
+  (post-fix) — 29.5s faster, ~3.3%.** Both requests returned in ~0.03s
+  (unaffected — that's the async fix from Phases A-D, not this one); this
+  number is purely the background scan's own duration.
+
+**Read this honestly, not as a contradiction**: `curl`'s real C functions
+tend to be substantially longer and more complex than short test-suite
+snippets — many are close to or over the 512-token truncation limit
+already, where `padding=True` has little or nothing left to save (a batch
+containing even one near-512-token function pads the whole batch close to
+512 anyway). The dramatic win is real but workload-dependent: short-function-
+heavy codebases benefit far more than large, complex-function codebases
+like `curl`. Reporting the 3.2x test-suite number alone would overstate
+what most real repo scans will actually see; the 3.3% real-repo number is
+also small enough to be partly within the same git-clone-time variance
+already flagged in Phase D's own before/after comparison (94.1s spread
+between two "before" measurements of the same repo). **The honest
+combined statement: this is a real, verified-correct, essentially-free
+optimization worth keeping, but "up to ~3x on short-function-heavy code,
+low single-digit percent on large real C projects" is the accurate
+range — not a uniform multi-x speedup claim.**
+
+### Reproducing this
+
+```bash
+cd src/model
+python verify_dynamic_padding.py
+```
