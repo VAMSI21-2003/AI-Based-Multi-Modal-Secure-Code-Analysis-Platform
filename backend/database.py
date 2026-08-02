@@ -101,6 +101,42 @@ class GitHubBatchMeta(Base):
     scanned_at = Column(DateTime, default=dt.datetime.utcnow)
 
 
+class ScanJob(Base):
+    """
+    Job-tracking record for async batch/GitHub scans
+    (docs/ASYNC_SCAN_DESIGN.md). One row per SUBMITTED job, created at
+    submission time and updated as the background task progresses.
+
+    Neither `scans` nor `github_batch_meta` can represent this: ScanRecord
+    rows only exist AFTER a single file's inference succeeds
+    (scan_service.run_and_store_scan), and GitHubBatchMeta is written once,
+    at completion (github_service). A job that is merely "queued" or
+    "running" has no row in either table to attach status to. A new table,
+    not new columns on `scans` or `github_batch_meta` -- same additive-
+    table convention GitHubBatchMeta's own docstring above already
+    established, avoiding any ALTER TABLE on either existing,
+    already-populated table. No FK constraint, consistent with every other
+    lookup column on `scans` (batch_id, derived_from_scan_id above).
+    """
+    __tablename__ = "scan_jobs"
+
+    batch_id = Column(String, primary_key=True)
+    kind = Column(String)  # "batch" | "github"
+    status = Column(String, default="queued")  # queued -> running -> succeeded | failed
+    files_total = Column(Integer, default=0)
+    files_completed = Column(Integer, default=0)
+    files_failed = Column(Integer, default=0)
+    error = Column(Text, nullable=True)
+    # Full result payload, same shape the old synchronous endpoint returned
+    # directly -- set once, on success, so the frontend's result-rendering
+    # code needs minimal change. JSON-serialized text, same pattern as
+    # ScanRecord.ast_features_json/metric_features_json above.
+    result_json = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=dt.datetime.utcnow)
+    started_at = Column(DateTime, nullable=True)
+    finished_at = Column(DateTime, nullable=True)
+
+
 Base.metadata.create_all(bind=engine)
 
 
