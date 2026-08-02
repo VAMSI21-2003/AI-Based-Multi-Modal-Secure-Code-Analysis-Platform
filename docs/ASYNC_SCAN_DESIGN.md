@@ -531,3 +531,78 @@ range — not a uniform multi-x speedup claim.**
 cd src/model
 python verify_dynamic_padding.py
 ```
+
+## 11. Phase F: redundant whole-file forward-pass removal (separate follow-up phase)
+
+§4's second, lower-risk optimization: `scan_service.py`'s PCA-scatter
+projection (Analysis Center's "CodeBERT Embedding Placement" chart) ran a
+second, fresh CodeBERT forward pass over the same file purely to get an
+embedding to project — on top of the per-function passes `run_prediction()`
+already did for the verdict. Fixed by threading the already-computed
+embedding through instead of discarding it.
+
+### What changed
+
+- `app/predictor.py`: both `predict_functions_with_model()` (per-function
+  path) and `predict_with_model()` (whole-code fallback path) now attach
+  the raw 768-dim embedding they already computed to their result dict as
+  `result["_embedding"]` — leading underscore, internal-only. Confirmed
+  before shipping that no API response spreads this dict (`grep -rn
+  '\*\*result\b'` across `backend/` and `app/`: zero matches), so this
+  can't leak a raw numpy array into any JSON response.
+- `scan_service.py`: `run_and_store_scan()` now reads `result["_embedding"]`
+  directly instead of calling `ml_bridge.full_feature_vector()` again,
+  falling back to the old recompute only if some future caller ever
+  produces a `result` without it (defensive, not expected on any current
+  path).
+- Three other `full_feature_vector()` call sites (`copilot.py`,
+  `routers/comparison.py`, `routers/scan.py`'s contribution-analysis
+  endpoints) were **deliberately left untouched** — they're on-demand,
+  per-view lookups against a previously-*stored* `ScanRecord` (no fresh
+  `result` dict with `_embedding` available at that point, since
+  `run_prediction()` isn't being called there), structurally different
+  from `scan_service.py`'s eager hot-path call this phase was scoped to.
+
+### A real, documented behavior change (not a bug)
+
+The PCA coordinate now reflects the **worst function's** embedding
+(per-function inference's basis for the verdict) rather than the **whole
+file's**. This is actually a *consistency fix*, not a new inconsistency:
+`ast_features`/`metric_features` stored on every `ScanRecord` were already
+worst-function-scoped since the per-function inference redesign
+(`docs/PER_FUNCTION_INFERENCE_DESIGN.md`) — only the PCA dot was still
+silently showing a different function's (the whole file's) semantic
+position. Confirmed via a dedicated new test
+(`backend/tests/test_pca_embedding_reuse.py`) that the reused embedding is
+provably the same vector the stored verdict was computed from, not a
+mismatched one, and that both the reused and a fresh-recompute coordinate
+are independently valid (finite, non-NaN) — they are not expected to be
+close to each other for a multi-function file, by design.
+
+### Real, measured speedup — directly attributable, not workload-dependent like Phase E
+
+Timed the exact call this phase eliminates, old vs. new, same real
+production tokenizer/model:
+
+| | Time |
+|---|---|
+| OLD: fresh whole-file forward pass (`full_feature_vector`) | 315.98ms |
+| NEW: reuse already-computed embedding (`result["_embedding"]` + PCA projection) | 6.76ms |
+| **Saved per file** | **309.22ms (~47x on this specific call)** |
+
+Unlike Phase E's optimization (workload-dependent — large on short
+functions, small on `curl`-sized real functions), this one is **flat, per-
+file overhead removed regardless of function length** — it's a duplicate
+call being deleted, not a compute-shape optimization. For a 200-file
+batch/GitHub scan, ~309ms × 200 ≈ **62 seconds of real scan time removed**,
+directly attributable to this change alone.
+
+### Testing
+
+New `backend/tests/test_pca_embedding_reuse.py` (4 tests): confirms
+`result["_embedding"]` is set and correctly shaped, confirms a stored scan
+gets a valid non-null/non-NaN PCA coordinate, confirms the reused
+embedding is provably the same vector used for the verdict (not a
+mismatched one), and confirms both reused and freshly-recomputed
+coordinates are independently valid. Full backend suite:
+**111/111 passed** (107 + 4 new), no regressions.

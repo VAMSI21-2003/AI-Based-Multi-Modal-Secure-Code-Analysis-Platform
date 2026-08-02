@@ -403,6 +403,14 @@ def predict_functions_with_model(functions: list, model, model_name: str,
         result["ast_features"] = ast_feats
         result["metric_features"] = metric_feats
         result["embedding_dims"] = int(embedding.shape[0])
+        # Internal-only (leading underscore, never serialized -- no API
+        # response spreads this dict, confirmed by grep before this change
+        # shipped): the raw 768-dim CodeBERT embedding already computed
+        # above, carried through so callers (scan_service.py's PCA-scatter
+        # projection) can reuse it instead of paying for a second forward
+        # pass over the same code just to get the same vector again. See
+        # docs/ASYNC_SCAN_DESIGN.md Sec 4 / Phase F.
+        result["_embedding"] = embedding
         results.append(result)
 
     return results
@@ -477,6 +485,9 @@ def predict_with_model(code: str, model, model_name: str,
     result["embedding_dims"]  = int(embedding.shape[0])   # should be 768
     result["embedding_source"]= embedding_source
     result["feature_vector_shape"] = X.shape              # (1, 792)
+    # Internal-only, not serialized anywhere -- see the matching comment in
+    # predict_functions_with_model() above.
+    result["_embedding"] = embedding
 
     return result
 

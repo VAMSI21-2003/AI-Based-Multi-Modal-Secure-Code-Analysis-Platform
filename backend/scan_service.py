@@ -28,13 +28,24 @@ def run_and_store_scan(
     metric_feats = result.get("metric_features", {})
 
     # Project this sample's embedding onto the precomputed 2D PCA space
-    # (visualisation only). We recompute the embedding cheaply by rerunning
-    # feature extraction is wasteful, so pull it from result if present.
+    # (visualisation only -- Analysis Center's "CodeBERT Embedding
+    # Placement" scatter). run_prediction() already ran CodeBERT once
+    # (per-function or whole-file, whichever path applied) and carries that
+    # embedding through internally as result["_embedding"] (predictor.py) --
+    # reuse it directly instead of paying for a second, redundant forward
+    # pass over the same code purely to get the same vector again. This was
+    # a real, measured cost: one full extra CodeBERT pass per file, on top
+    # of the per-function passes already done for the verdict (see
+    # docs/ASYNC_SCAN_DESIGN.md Sec 4 / Phase F). Falls back to recomputing
+    # only if some future caller of run_and_store_scan ever produces a
+    # result without it (defensive, not expected on any current path).
     emb_xy = (None, None)
     tokenizer_available = not result.get("is_demo", True)
     if tokenizer_available:
         try:
-            _, embedding = ml_bridge.full_feature_vector(code, ast_feats, metric_feats)
+            embedding = result.get("_embedding")
+            if embedding is None:
+                _, embedding = ml_bridge.full_feature_vector(code, ast_feats, metric_feats)
             projected = ml_bridge.project_embedding(embedding)
             if projected:
                 emb_xy = (projected[0], projected[1])
