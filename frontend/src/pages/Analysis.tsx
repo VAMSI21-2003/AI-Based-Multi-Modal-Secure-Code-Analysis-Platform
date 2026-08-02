@@ -14,13 +14,22 @@ import FeatureRadar from "../components/FeatureRadar";
 import EmbeddingScatter from "../components/EmbeddingScatter";
 import ContributionBars from "../components/ContributionBars";
 import { useActiveScan } from "../hooks/useActiveScan";
-import { getHistory, downloadScanPdf } from "../api/client";
+import { getHistory, downloadScanPdf, getHealth } from "../api/client";
 import toast from "react-hot-toast";
 import { timeAgo } from "../utils/risk";
 
 export default function Analysis() {
   const { scanId, scan, detail, loading, error } = useActiveScan();
   const [timeline, setTimeline] = useState<any[]>([]);
+
+  // Authoritative server-side signal (backend/main.py's /api/health) for
+  // whether THIS live deployment currently has CodeBERT loaded -- null
+  // until resolved, never guessed client-side. Reflects the deployment's
+  // current state, not whatever was true when `scan` was originally run.
+  const [codebertAvailable, setCodebertAvailable] = useState<boolean | null>(null);
+  useEffect(() => {
+    getHealth().then((h) => setCodebertAvailable(h.codebert_available)).catch(() => {});
+  }, []);
 
   useEffect(() => {
     if (!scan) return;
@@ -90,6 +99,20 @@ export default function Analysis() {
               heuristic fallback ({scan.model_used}), not the real multi-modal ML pipeline. Feature contributions and
               embedding placement below will show as unavailable for the same reason. Re-run this scan once the
               trained models are loaded to get a real prediction.
+            </div>
+          </div>
+        </div>
+      )}
+
+      {codebertAvailable === false && (
+        <div className="mb-5 rounded-xl border p-4 flex items-start gap-3" style={{ background: "rgba(200,150,20,0.08)", borderColor: "rgba(200,150,20,0.35)" }}>
+          <ShieldAlert size={18} className="text-(--status-warning) shrink-0 mt-0.5" />
+          <div>
+            <div className="text-sm font-semibold text-(--status-warning)">Running in reduced-accuracy mode</div>
+            <div className="text-xs text-(--text-secondary) mt-1.5">
+              Semantic (CodeBERT) analysis is unavailable on this free-tier deployment — this and other results shown
+              here use structural (AST) and metric features only, not the full multi-modal pipeline. See
+              docs/FREE_TIER_DEPLOYMENT.md for details.
             </div>
           </div>
         </div>

@@ -15,6 +15,14 @@ _state = {
     "model_load_times_sec": {},   # {"xgboost": 0.4, "random_forest": 0.1, "codebert": 6.2}
     "prediction_latencies_ms": deque(maxlen=200),
     "process": psutil.Process(),
+    # None until ml_bridge.get_codebert() has actually run once (e.g. a test
+    # that skips app startup/lifespan on purpose -- see test_health.py). True/
+    # False once it has. Authoritative, explicit signal for whether real
+    # semantic embeddings are available -- NOT a load-time heuristic the
+    # frontend has to guess from (docs/FREE_TIER_DEPLOYMENT.md: free-tier
+    # deployments deliberately omit torch/transformers, so this is False
+    # there by design, not a bug).
+    "codebert_available": None,
 }
 
 _process_start = time.time()
@@ -22,6 +30,14 @@ _process_start = time.time()
 
 def record_model_load(name: str, seconds: float):
     _state["model_load_times_sec"][name] = round(seconds, 3)
+
+
+def record_codebert_available(available: bool):
+    _state["codebert_available"] = available
+
+
+def codebert_available():
+    return _state["codebert_available"]
 
 
 def record_prediction_latency(seconds: float):

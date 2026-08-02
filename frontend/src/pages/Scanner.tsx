@@ -1,8 +1,8 @@
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   UploadCloud, FolderOpen, FileArchive, ScanLine, Sparkles, Loader2,
-  CheckCircle2, XCircle, ArrowRight, FileCode2, X, Download, FolderGit2, Code2,
+  CheckCircle2, XCircle, ArrowRight, FileCode2, X, Download, FolderGit2, Code2, ShieldAlert,
 } from "lucide-react";
 import clsx from "clsx";
 import toast from "react-hot-toast";
@@ -11,7 +11,7 @@ import CodeEditor from "../components/CodeEditor";
 import RiskBadge, { VerdictPill } from "../components/RiskBadge";
 import ProgressBar from "../components/ProgressBar";
 import { EXAMPLES } from "../data/examples";
-import { scanCode, scanBatch, pollScanJob, downloadBatchPdf, type ScanResult, type BatchResult, type ScanJob } from "../api/client";
+import { scanCode, scanBatch, pollScanJob, downloadBatchPdf, getHealth, type ScanResult, type BatchResult, type ScanJob } from "../api/client";
 import { getDefaultModel } from "../utils/settings";
 
 type Mode = "paste" | "batch" | "examples";
@@ -40,6 +40,16 @@ export default function Scanner() {
   const [dragOver, setDragOver] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
+
+  // Authoritative server-side signal (backend/main.py's /api/health, backed
+  // by system_monitor.codebert_available()) -- null until resolved, never
+  // guessed client-side. See docs/FREE_TIER_DEPLOYMENT.md: free-tier
+  // deployments deliberately don't load CodeBERT, so this is false there by
+  // design.
+  const [codebertAvailable, setCodebertAvailable] = useState<boolean | null>(null);
+  useEffect(() => {
+    getHealth().then((h) => setCodebertAvailable(h.codebert_available)).catch(() => {});
+  }, []);
 
   const runSingleScan = async () => {
     setScanning(true);
@@ -94,6 +104,16 @@ export default function Scanner() {
 
   return (
     <PageShell title="Code Scanner" subtitle="Analyse individual functions or scan entire projects for vulnerabilities">
+      {codebertAvailable === false && (
+        <div className="mb-5 rounded-xl border p-3 flex items-start gap-3" style={{ background: "rgba(200,150,20,0.08)", borderColor: "rgba(200,150,20,0.35)" }}>
+          <ShieldAlert size={16} className="text-(--status-warning) shrink-0 mt-0.5" />
+          <div className="text-xs text-(--text-secondary)">
+            <span className="font-semibold text-(--status-warning)">Running in reduced-accuracy mode:</span>{" "}
+            semantic (CodeBERT) analysis is unavailable on this free-tier deployment — results use structural and
+            metric features only.
+          </div>
+        </div>
+      )}
       <div className="flex gap-2 mb-5">
         {([
           { id: "paste", label: "Paste / Edit Code", icon: FileCode2 },

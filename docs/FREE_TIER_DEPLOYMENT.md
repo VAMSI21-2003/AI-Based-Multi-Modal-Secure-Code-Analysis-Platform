@@ -133,3 +133,47 @@ curl http://localhost:8001/api/health
 docker stats lite-test --no-stream
 docker rm -f lite-test
 ```
+
+## 7. Live deployment record
+
+- Backend:  https://securecode-ai-backend.onrender.com
+- Frontend: https://securecode-ai.vercel.app
+- Repo:     https://github.com/VAMSI21-2003/AI-Based-Multi-Modal-Secure-Code-Analysis-Platform
+
+Live end-to-end verification (real requests against the actual deployed
+services, not a local reproduction):
+
+- `GET /api/health` → `{"status":"ok"}`, 200, 0.82s (backend already warm).
+- `POST /api/scan/code` direct against the live backend → 200, 0.29s,
+  `verdict: VULNERABLE`, `vuln_probability: 53.31`, `model_used: XGBoost`,
+  `is_demo: false`.
+- `GET /api/system/stats` on the live backend → `process_ram_mb: 328.8`
+  (real live RSS, consistent with the fallback measurements in §1, nowhere
+  near the ~700-800MB CodeBERT would need) and
+  `model_load_times_sec.codebert: 0.001` (an instant failed import, not a
+  real multi-second weight load) — independent confirmation the live
+  deployment is genuinely in fallback mode, not just claiming to be.
+- Same scan submitted through the real browser UI at the Vercel URL:
+  identical result rendered (VULNERABLE / MEDIUM RISK / 53.3% / XGBoost).
+  Network tab confirmed `POST https://securecode-ai-backend.onrender.com/api/scan/code`
+  → 200, made cross-origin from the Vercel domain — only possible if CORS
+  is genuinely configured correctly, since the browser blocks the request
+  client-side otherwise. Zero console errors.
+
+### Fallback-mode disclosure banner
+
+Since `is_demo: false` alone could be misread as "full model" when this
+deployment is actually running real XGBoost on a degraded (CodeBERT-zeroed)
+feature vector, the Scanner and Analysis pages show a visible banner
+("Running in reduced-accuracy mode: semantic (CodeBERT) analysis is
+unavailable on this free-tier deployment...") whenever that's genuinely
+true. The signal is authoritative and server-side, not guessed client-side:
+`backend/system_monitor.py` records whether `ml_bridge.get_codebert()`
+actually returned a real tokenizer/model the one time it runs (at startup,
+via `lifespan()`), and `GET /api/health` exposes it as
+`codebert_available: true | false | null` (`null` only if that resolution
+genuinely hasn't happened yet in-process, which never occurs against a
+running deployed app). The frontend (`frontend/src/api/client.ts`'s
+`getHealth()`) fetches this once per page load on Scanner and Analysis, and
+renders the banner only on an explicit `=== false`, never on a falsy/null
+value — so it can't false-positive while the check is still in flight.

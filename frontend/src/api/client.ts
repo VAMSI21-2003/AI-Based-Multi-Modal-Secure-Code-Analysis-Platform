@@ -14,6 +14,16 @@ export const api = axios.create({
   timeout: 120000,
 });
 
+// codebert_available is an authoritative server-side signal (backend/main.py
+// + system_monitor.py), not something the frontend infers from a scan
+// result -- null means "not yet resolved" (should never happen against a
+// real running app, whose lifespan resolves this at startup before serving
+// any request), true/false is the real state. Used to show an honest
+// reduced-accuracy disclosure on free-tier deployments where CodeBERT is
+// deliberately not loaded (docs/FREE_TIER_DEPLOYMENT.md).
+export interface Health { status: string; codebert_available: boolean | null; }
+export const getHealth = () => api.get<Health>("/health").then((r) => r.data);
+
 // Single-file paste/live scans (POST /scan/code, /scan/live) are one
 // blocking request -- correctly so, they're fast (seconds) and don't need
 // the async job machinery below. Configurable via VITE_SCAN_TIMEOUT_MS,

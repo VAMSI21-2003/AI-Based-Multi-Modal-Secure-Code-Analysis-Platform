@@ -70,7 +70,9 @@ def get_rf_model():
 
 @functools.lru_cache(maxsize=1)
 def get_codebert():
-    return system_monitor.timed_model_load("codebert", load_codebert_components)
+    tokenizer, model = system_monitor.timed_model_load("codebert", load_codebert_components)
+    system_monitor.record_codebert_available(tokenizer is not None and model is not None)
+    return tokenizer, model
 
 
 def models_status() -> dict:

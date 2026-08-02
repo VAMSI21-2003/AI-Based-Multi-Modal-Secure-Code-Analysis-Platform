@@ -23,6 +23,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from routers import scan, dashboard, history, analytics, knowledge, report, intelligence, system, comparison, project, research, copilot as copilot_router, patches, export, watch, github, gamification, search
 import job_service
 import ml_bridge
+import system_monitor
 
 
 @asynccontextmanager
@@ -95,4 +96,12 @@ app.include_router(search.router)
 
 @app.get("/api/health")
 def health():
-    return {"status": "ok"}
+    # codebert_available is None only if get_codebert() has genuinely never
+    # run in this process (e.g. a test that skips lifespan on purpose --
+    # see test_health.py); the real running app always resolves this at
+    # startup (lifespan() above) before serving any request. True/False is
+    # authoritative -- not a load-time heuristic -- for whether this
+    # deployment is using real CodeBERT embeddings or the zero-vector
+    # fallback (docs/FREE_TIER_DEPLOYMENT.md). The frontend uses this to
+    # show an honest reduced-accuracy disclosure, not to guess client-side.
+    return {"status": "ok", "codebert_available": system_monitor.codebert_available()}
