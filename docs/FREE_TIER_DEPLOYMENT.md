@@ -26,18 +26,26 @@ WARNING  predictor: Could not load CodeBERT: No module named 'torch'
 INFO:    Application startup complete.
 ```
 
-A real scan through the capped container (`POST /api/scan/code`) returned a
-genuine model verdict, not the pure-heuristic demo path:
+A real scan through the capped container (`POST /api/scan/code`) returned:
 ```json
 {"verdict": "VULNERABLE", "vuln_probability": 53.31, "model_used": "XGBoost", "is_demo": false}
 ```
-`is_demo: false` confirms the real trained XGBoost classifier ran (on
-AST+Metrics+zero-CodeBERT) — this is `app/predictor.py`'s existing,
-pre-built fallback path (`load_codebert_components()`'s `except Exception`
-catches the `ModuleNotFoundError` and returns `(None, None)`; every
-downstream caller already checks for that and degrades). **Zero application
-code changes were needed** for this — only the requirements/Dockerfile
-excluded torch/transformers.
+**Be precise about what this does and does not prove.** CodeBERT was never
+loaded and never ran — `torch` was never installed in this image (excluded
+from `requirements-lite.txt` on purpose; this is not a memory optimization
+that made CodeBERT fit, there isn't one). `is_demo: false` means the real
+*trained XGBoost classifier* ran — as opposed to `demo_predict()`'s
+separate, pure regex-heuristic path — but its input was real AST + Metrics
+features with CodeBERT's 768-dim embedding slot filled with **zeros**, not
+a real semantic embedding. Internally `app/predictor.py` labels this
+`embedding_source: "Zero vector (CodeBERT not loaded)"`. So: a real
+classifier, on a real-but-degraded feature vector. It is not, and was never
+claimed to be, CodeBERT-based inference. This is `app/predictor.py`'s
+existing, pre-built fallback path (`load_codebert_components()`'s `except
+Exception` catches the `ModuleNotFoundError` and returns `(None, None)`;
+every downstream caller already checks for that and degrades). **Zero
+application code changes were needed** for this — only the
+requirements/Dockerfile excluded torch/transformers.
 
 The original `backend/Dockerfile` (with CodeBERT) would exceed the 512MB
 cap by ~60% and get OOM-killed by Render — confirmed by the 835.2MB
