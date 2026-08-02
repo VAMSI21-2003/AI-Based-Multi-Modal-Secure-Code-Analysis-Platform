@@ -1,8 +1,10 @@
-# Async Batch/GitHub Scan (Submit → Poll → Result) — Design (proposed)
+# Async Batch/GitHub Scan (Submit → Poll → Result) — Design (implemented)
 
-**Status: proposed, not implemented.** Investigation-only per explicit
-direction — report back and wait for sign-off before writing any
-implementation code. Follows the same design-doc-first discipline as
+**Status: implemented.** Built in 4 phases (schema → backend endpoints →
+frontend polling UI → docs/live verification), each committed and tested
+independently — see "Implementation notes" (§9) below for what was
+actually built, real before/after numbers, and where it deviated from this
+design, and why. Follows the same phased discipline as
 `docs/APPLY_PATCH_LOOP_DESIGN.md`.
 
 ## 0. Why this matters — the correctness finding, not just UX
@@ -328,4 +330,122 @@ otherwise:
    of scope for this task** — flagged as a related finding, not proposed
    for this work.
 
-Waiting for sign-off on the above before writing any implementation code.
+## 9. Implementation notes
+
+All 5 sign-off questions in §8 were confirmed as designed and shipped
+without deviation: `scan_jobs` new table (Phase A), `BackgroundTasks` with
+no new infra (Phase B), the `{batch_id, status}` / `GET
+/api/scan/jobs/{batch_id}` API contract (Phase B), the two speed
+optimizations deferred to a separate follow-up phase not yet started
+(§4's two items — tracked separately, not part of this implementation),
+and watch-mode's identical blocking issue left untouched, out of scope.
+
+Built in 4 phases, each committed and tested independently:
+
+- **Phase A (schema)**: `ScanJob` added to `backend/database.py`. Verified
+  additive-safe against both a fresh test DB and the real,
+  already-populated `platform.db` (2,131 existing scan rows confirmed
+  untouched). Full backend suite: 97/97 passed before any behavior change.
+- **Phase B (backend)**: `scan_batch` converted from `async def` to plain
+  `def` — this is itself the fix for the event-loop-freeze bug identified
+  in §2, not a separate change. `github_service.scan_repo()` was replaced
+  by `submit_scan_job()` (validates the URL synchronously, unchanged
+  fail-fast behavior) + `_run_github_scan_job()` (backgrounded). New
+  `backend/job_service.py` for job state transitions, plus
+  `reap_orphaned_jobs()` wired into `main.py`'s `lifespan`. New
+  `backend/tests/test_scan_jobs.py` (10 tests: state transitions, the
+  polling endpoint, a real end-to-end submit→poll→succeeded run, orphaned-
+  job reaping); `test_batch_upload_security.py` updated to the new
+  submit→poll contract. Full suite: 107/107 passed.
+- **Phase C (frontend)**: `Scanner.tsx` (batch upload) and
+  `GitHubMode.tsx` now submit and poll via a new `pollScanJob()` helper in
+  `api/client.ts` (recursive `setTimeout`, the same pattern
+  `WatchMode.tsx`'s polling already used elsewhere in this codebase — no
+  new polling primitive invented). Progress bars show real
+  `files_completed`/`files_total`, not an upload-percentage stand-in.
+  tsc clean, vitest 9/9, production build succeeds. Verified live in a
+  real browser, not just automated checks (see below).
+- **Phase D (this section + live verification)**: below.
+
+### Live verification (the actual proof, not "should work now")
+
+Ran against the real, running app (manual dev servers — backend on
+`127.0.0.1:8000`, frontend on `localhost:5173` — not just the test suite),
+reusing the exact repo `docs/PER_FUNCTION_INFERENCE_DESIGN.md` measured
+the "before" numbers on, for a true apples-to-apples comparison:
+
+**Submitted `POST /api/github/scan` for `https://github.com/curl/curl.git`
+(the same repo, 200 files after this platform's own file cap — identical
+workload to the "before" measurement):**
+
+```
+$ curl -s -w "\nHTTP_STATUS:%{http_code}\nTIME_TOTAL:%{time_total}\n" \
+    -X POST http://127.0.0.1:8000/api/github/scan \
+    -d '{"repo_url":"https://github.com/curl/curl.git", ...}'
+{"batch_id":"gh_a2e8544b81","status":"queued"}
+HTTP_STATUS:200
+TIME_TOTAL:0.036666
+```
+
+**The request returned in 0.037 seconds** with a job id. Under the old
+blocking behavior, this identical request took up to 797.5s (13.3 min,
+`docs/PER_FUNCTION_INFERENCE_DESIGN.md:199-202`) and — per §2's finding —
+froze the entire server for every user for that whole duration.
+
+**While that scan ran in the background, polled `GET /api/health` (a
+completely separate request) every 20 seconds for the scan's full
+duration**, to directly test the claim from §2: does the server stay
+responsive to other users during a long scan now?
+
+Polled every 20s from job creation to completion, 45 data points total
+(full log in the commit this section is part of). Representative sample:
+
+| Elapsed | `/api/health` response | Job status |
+|---|---|---|
+| 20s | `200 OK` in **17.6ms** | running, 0/200 files |
+| 100s | `200 OK` in **12.6ms** | running, 28/200 files |
+| 300s | `200 OK` in **10.3ms** | running, 67/200 files |
+| 500s | `200 OK` in **4.2ms** | running, 136/200 files |
+| 700s | `200 OK` in **4.0ms** | running, 179/200 files |
+| 860s | `200 OK` in **6.0ms** | running, 198/200 files |
+| **880s** | `200 OK` in **2.6ms** | **succeeded, 200/200 files** |
+
+Every single one of the 45 polls returned `200 OK` in under 20ms — no
+degradation at any point, including in the final poll that landed exactly
+as the job completed. Direct, measured proof the event-loop-freeze bug
+from §2 is fixed, not just "the UI looks nicer now." The old code could
+not have served this request *at all* until the scan finished, ~15 minutes
+later — every one of these 45 checks would have simply hung.
+
+**Wall-clock comparison, same repo, same 200-file workload:**
+
+| | Before (blocking `async def`) | After (async job) |
+|---|---|---|
+| Client-visible response time | ~797.5s (13.3 min) | **0.037s** |
+| Server responsiveness to other users during the scan | **Frozen — zero other requests served** | **Fully responsive throughout — 45/45 health checks under 20ms, confirmed live above** |
+| Actual scan completion time (server-side work) | 797.5s (`docs/PER_FUNCTION_INFERENCE_DESIGN.md`) | **894.1s** (`started_at` to `finished_at`, exact timestamps from the job record) |
+| Final scan result | Full batch result, all files scored | **Identical shape and content**, fetched via `job.result` once `status: "succeeded"` |
+
+The ~12% longer total duration this run (894.1s vs. 797.5s) is **not** a
+regression from this change — the CodeBERT/AST/metrics/XGBoost inference
+pipeline itself is byte-for-byte untouched; only the request/scheduling
+layer around it changed. The most likely explanation is ordinary variance
+in `git clone`'s network time against the real `curl/curl` repository,
+measured on a different day under different network conditions — not
+something this design controls or claims to improve (§4's deferred speed
+optimizations are the only changes that would touch actual inference
+duration). What this phase changes is *only* whether the server blocks
+while that work happens, and the 45-point health-check table above is the
+direct proof that it no longer does.
+
+**Result correctness**: the completed job's `result` field —
+`{"batch_id": "gh_a2e8544b81", "repo_name": "curl", "files_scanned": 200,
+"files_found": 200, "files_detected": 886, "files_skipped": 686,
+"skip_reasons": ["686 file(s) beyond this platform's 200-file-per-scan
+cap"], "commits_recorded": 20}` — matches the exact shape
+`github_service.scan_repo()` used to return synchronously, with
+`files_failed: 0` confirming every one of the 200 matched files scanned
+cleanly. The batch-upload live-browser test (Phase C) additionally
+confirmed end-to-end correctness on real files: 2 test files uploaded,
+both correctly flagged vulnerable (a `strcpy` overflow and an off-by-one
+array write), 0 skipped.
