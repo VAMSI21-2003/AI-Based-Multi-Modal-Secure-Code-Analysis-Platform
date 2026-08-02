@@ -1,0 +1,103 @@
+{
+  "n_splits": 5,
+  "random_state": 42,
+  "n_estimators": 100,
+  "n_rows": 27231,
+  "n_features": 792,
+  "n_distinct_commits": 12290,
+  "fold_metrics": [
+    {
+      "scale_pos_weight": 1.19,
+      "n_train": 21784,
+      "n_test": 5447,
+      "accuracy": 0.5536992840095465,
+      "precision": 0.5120259019426457,
+      "recall": 0.44583165525573903,
+      "f1": 0.4766415500538213,
+      "auc": 0.5720850501357952,
+      "fold": 0
+    },
+    {
+      "scale_pos_weight": 1.19,
+      "n_train": 21785,
+      "n_test": 5446,
+      "accuracy": 0.5279103929489534,
+      "precision": 0.48151225592023267,
+      "recall": 0.4669621273166801,
+      "f1": 0.4741255880548169,
+      "auc": 0.5462366827935767,
+      "fold": 1
+    },
+    {
+      "scale_pos_weight": 1.19,
+      "n_train": 21785,
+      "n_test": 5446,
+      "accuracy": 0.5549026808666911,
+      "precision": 0.5113993710691824,
+      "recall": 0.524174053182917,
+      "f1": 0.517707918822125,
+      "auc": 0.5795437677594469,
+      "fold": 2
+    },
+    {
+      "scale_pos_weight": 1.19,
+      "n_train": 21785,
+      "n_test": 5446,
+      "accuracy": 0.5424164524421594,
+      "precision": 0.49796747967479676,
+      "recall": 0.4935535858178888,
+      "f1": 0.49575070821529743,
+      "auc": 0.5651635772161452,
+      "fold": 3
+    },
+    {
+      "scale_pos_weight": 1.19,
+      "n_train": 21785,
+      "n_test": 5446,
+      "accuracy": 0.5293793609988983,
+      "precision": 0.48304730012557556,
+      "recall": 0.4649476228847704,
+      "f1": 0.4738246766577705,
+      "auc": 0.5567649152168215,
+      "fold": 4
+    }
+  ],
+  "summary": {
+    "accuracy": {
+      "mean": 0.5417,
+      "std": 0.0129,
+      "se": 0.0057
+    },
+    "precision": {
+      "mean": 0.4972,
+      "std": 0.0147,
+      "se": 0.0066
+    },
+    "recall": {
+      "mean": 0.4791,
+      "std": 0.0304,
+      "se": 0.0136
+    },
+    "f1": {
+      "mean": 0.4876,
+      "std": 0.0191,
+      "se": 0.0086
+    },
+    "auc": {
+      "mean": 0.564,
+      "std": 0.013,
+      "se": 0.0058
+    }
+  },
+  "baseline_comparison": {
+    "baseline_f1": 0.5391,
+    "baseline_auc": 0.6346,
+    "baseline_accuracy": 0.5932,
+    "baseline_precision": 0.5574,
+    "baseline_recall": 0.5219,
+    "grouped_f1_mean": 0.4876,
+    "grouped_auc_mean": 0.564,
+    "f1_difference": -0.0515,
+    "auc_difference": -0.0706
+  }
+}
