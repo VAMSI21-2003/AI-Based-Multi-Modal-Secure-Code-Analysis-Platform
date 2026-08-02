@@ -1,12 +1,12 @@
 # Render.com free-tier deployment of the backend API. See
 # docs/FREE_TIER_DEPLOYMENT.md for the full investigation/measurements this
-# is based on. Deploy: Render dashboard -> New -> Blueprint -> select this
+# is based on, and the live deployment record (real URLs, live verification
+# results). Deploy: Render dashboard -> New -> Blueprint -> select this
 # repo -> it reads this file.
 #
-# After the service is up, set CORS_ALLOWED_ORIGINS below to the real
-# deployed Vercel URL (the placeholder here will reject the frontend's
-# requests until you do) and update frontend/.env's VITE_API_BASE_URL (or
-# the Vercel project's env var) to this service's real onrender.com URL.
+# Live URLs (as of the live verification in docs/FREE_TIER_DEPLOYMENT.md):
+#   Backend:  https://securecode-ai-backend.onrender.com
+#   Frontend: https://securecode-ai.vercel.app
 services:
   - type: web
     name: securecode-ai-backend
@@ -17,4 +17,4 @@ services:
     healthCheckPath: /api/health
     envVars:
       - key: CORS_ALLOWED_ORIGINS
-        value: https://REPLACE-WITH-YOUR-VERCEL-URL.vercel.app
+        value: https://securecode-ai.vercel.app
