@@ -84,8 +84,8 @@ class GitHubBatchMeta(Base):
     (not new columns on `scans`) so this is a purely additive change: no
     ALTER TABLE on the existing, already-populated `scans` table, and a
     fresh SQLite database with no rows here is exactly as valid as one with
-    many. One row per batch_id, written once when github_service.scan_repo()
-    finishes cloning+scanning.
+    many. One row per batch_id, written once when
+    github_service._run_github_scan_job() finishes cloning+scanning.
     """
     __tablename__ = "github_batch_meta"
 

@@ -21,6 +21,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from routers import scan, dashboard, history, analytics, knowledge, report, intelligence, system, comparison, project, research, copilot as copilot_router, patches, export, watch, github, gamification, search
+import job_service
 import ml_bridge
 
 
@@ -33,6 +34,16 @@ async def lifespan(app: FastAPI):
     ml_bridge.get_xgb_model()
     ml_bridge.get_rf_model()
     ml_bridge.get_codebert()
+
+    # Async batch/GitHub scan jobs (docs/ASYNC_SCAN_DESIGN.md) run via
+    # BackgroundTasks, in-process -- if this process restarted while a job
+    # was mid-flight (container restart, --reload picking up a file
+    # change), that job's row is orphaned at "queued"/"running" forever,
+    # since nothing will ever update it again. Reap them once at startup.
+    reaped = job_service.reap_orphaned_jobs()
+    if reaped:
+        print(f"[startup] Marked {reaped} orphaned scan job(s) as failed (interrupted by restart).")
+
     yield
 
 

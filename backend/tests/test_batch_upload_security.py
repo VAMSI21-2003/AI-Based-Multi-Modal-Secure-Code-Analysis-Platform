@@ -8,9 +8,18 @@
 # tested here as defense-in-depth, and because the batch response now reports
 # WHY files were skipped (a real product-honesty requirement), that reporting
 # itself needs a regression test.
+#
+# POST /api/scan/batch is now async (docs/ASYNC_SCAN_DESIGN.md): it returns
+# {batch_id, status: "queued", files_total} immediately instead of the full
+# result. TestClient runs the whole ASGI cycle -- including BackgroundTasks --
+# to completion before .post() returns control, so by the time these tests
+# poll GET /api/scan/jobs/{batch_id} once, the job is already "succeeded" in
+# practice; _poll_until_done below still loops properly rather than assuming
+# that, so these tests would keep working even if that timing changed.
 # =============================================================================
 
 import io
+import time
 import zipfile
 
 from fastapi.testclient import TestClient
@@ -19,6 +28,16 @@ from main import app
 from routers.scan import is_safe_archive_member_path
 
 client = TestClient(app)
+
+
+def _poll_until_done(batch_id: str, timeout_sec: float = 30.0) -> dict:
+    deadline = time.monotonic() + timeout_sec
+    while time.monotonic() < deadline:
+        job = client.get(f"/api/scan/jobs/{batch_id}").json()
+        if job["status"] in ("succeeded", "failed"):
+            return job
+        time.sleep(0.05)
+    raise AssertionError(f"job {batch_id} did not finish within {timeout_sec}s")
 
 VULNERABLE_SNIPPET = """
 void copy_input(char *dest, const char *src) {
@@ -78,10 +97,16 @@ def test_batch_upload_rejects_traversal_member_but_scans_the_safe_one():
         files={"files": ("repo.zip", zip_bytes, "application/zip")},
     )
     assert response.status_code == 200
-    body = response.json()
-    assert body["total_files_scanned"] == 1
-    assert any("unsafe path" in reason for reason in body["skip_reasons"])
-    assert body["results"][0]["filename"] == "src/vuln.c"
+    submitted = response.json()
+    assert submitted["status"] == "queued"
+    assert submitted["files_total"] == 1
+
+    job = _poll_until_done(submitted["batch_id"])
+    assert job["status"] == "succeeded"
+    result = job["result"]
+    assert result["total_files_scanned"] == 1
+    assert any("unsafe path" in reason for reason in result["skip_reasons"])
+    assert result["results"][0]["filename"] == "src/vuln.c"
 
 
 def test_batch_upload_reports_skip_reasons_for_unsupported_files():
@@ -95,10 +120,14 @@ def test_batch_upload_reports_skip_reasons_for_unsupported_files():
         files={"files": ("repo.zip", zip_bytes, "application/zip")},
     )
     assert response.status_code == 200
-    body = response.json()
-    assert body["files_detected"] == 1
-    assert body["total_files_scanned"] == 1
-    assert any("unsupported extension" in reason for reason in body["skip_reasons"])
+    submitted = response.json()
+
+    job = _poll_until_done(submitted["batch_id"])
+    assert job["status"] == "succeeded"
+    result = job["result"]
+    assert result["files_detected"] == 1
+    assert result["total_files_scanned"] == 1
+    assert any("unsupported extension" in reason for reason in result["skip_reasons"])
 
 
 def test_batch_upload_rejects_zip_with_too_many_members():

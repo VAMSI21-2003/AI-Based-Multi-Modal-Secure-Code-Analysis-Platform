@@ -10,14 +10,15 @@ import re
 import zipfile
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, UploadFile, File, Form
 from sqlalchemy.orm import Session
 from sqlalchemy import func, case
 
+import job_service
 import ml_bridge
 import recommendations
 import code_intelligence
-from database import get_db, ScanRecord
+from database import get_db, ScanRecord, SessionLocal
 from schemas import CodeScanRequest, RewriteRequest, LiveScanRequest
 from scan_service import run_and_store_scan, record_to_dict
 
@@ -155,13 +156,88 @@ def scan_live(req: LiveScanRequest):
     }
 
 
+def _run_batch_job(
+    batch_id: str,
+    to_process: list,
+    project_name: str,
+    model_choice: str,
+    total_files_submitted: int,
+    files_detected: int,
+    skip_reasons_so_far: list,
+) -> None:
+    """
+    Runs off the request thread (FastAPI BackgroundTasks -> AnyIO
+    threadpool, the same offloading plain `def` routes already get -- see
+    docs/ASYNC_SCAN_DESIGN.md Sec 2/5). Opens its own DB session rather
+    than reusing the request's, matching github_service.py's existing
+    background-work pattern (SessionLocal() created fresh, not borrowed
+    from a request-scoped Depends(get_db)).
+    """
+    db = SessionLocal()
+    try:
+        job_service.mark_running(db, batch_id)
+
+        results = []
+        skip_invalid_content = 0
+        for filename, content in to_process:
+            is_valid, _ = ml_bridge.validate_code(content)
+            if not is_valid:
+                skip_invalid_content += 1
+                job_service.increment_progress(db, batch_id, failed_delta=1)
+                continue
+            record = run_and_store_scan(
+                db, content, project_name, filename, model_choice, "batch", batch_id=batch_id,
+            )
+            results.append(record_to_dict(record, include_code=False))
+            job_service.increment_progress(db, batch_id, completed_delta=1)
+
+        skip_reasons = list(skip_reasons_so_far)
+        if skip_invalid_content > 0:
+            skip_reasons.append(f"{skip_invalid_content} file(s) failed content validation (empty/malformed)")
+
+        vulnerable = sum(1 for r in results if r["verdict"] == "VULNERABLE")
+        result = {
+            "batch_id": batch_id,
+            "total_files_submitted": total_files_submitted,
+            "files_detected": files_detected,
+            "total_files_scanned": len(results),
+            "files_skipped": files_detected - len(results),
+            "skip_reasons": skip_reasons,
+            "vulnerable_count": vulnerable,
+            "safe_count": len(results) - vulnerable,
+            "results": results,
+        }
+        job_service.mark_succeeded(db, batch_id, result)
+    except Exception as e:
+        job_service.mark_failed(db, batch_id, str(e))
+    finally:
+        db.close()
+
+
 @router.post("/batch")
-async def scan_batch(
+def scan_batch(
+    background_tasks: BackgroundTasks,
     project_name: str = Form("Untitled Project"),
     model_choice: str = Form("XGBoost"),
     files: list[UploadFile] = File(...),
-    db: Session = Depends(get_db),
 ):
+    """
+    Submits an async job and returns immediately (docs/ASYNC_SCAN_DESIGN.md)
+    instead of blocking for the full scan duration. Upload read + ZIP
+    decompress + filename/path/size filtering still happen synchronously
+    here -- fast, and files_total needs to be known before responding --
+    only the per-file inference loop (the actual multi-minute cost) moves
+    into _run_batch_job above, off the event loop.
+
+    Plain `def`, not `async def`: this is itself part of the fix. The
+    previous `async def` version's inference loop had no `await` in it,
+    so it ran directly on the event loop thread instead of being
+    threadpooled, freezing the entire server for every user for the full
+    scan duration -- confirmed in docs/ASYNC_SCAN_DESIGN.md Sec 2. Plain
+    `def` here means Starlette threadpools this handler exactly like
+    every other route already is, and reading via `f.file.read()`
+    (sync) instead of `await f.read()` (async) is required for that.
+    """
     batch_id = uuid.uuid4().hex[:12]
     detected = []  # (filename, code_text) -- every file that passed extension/dir/size/path filtering, before the batch cap
 
@@ -173,10 +249,9 @@ async def scan_batch(
     skip_unsafe_path = 0
     skip_corrupt_zip = 0
     skip_zip_bomb = 0
-    skip_invalid_content = 0
 
     for f in files:
-        raw = await f.read()
+        raw = f.file.read()
         name = f.filename or "unknown"
         if name.lower().endswith(".zip"):
             try:
@@ -221,44 +296,38 @@ async def scan_batch(
             detail="No scannable .c/.cpp/.h files found (directly or inside a .zip).",
         )
 
-    results = []
-    for filename, content in to_process:
-        is_valid, _ = ml_bridge.validate_code(content)
-        if not is_valid:
-            skip_invalid_content += 1
-            continue
-        record = run_and_store_scan(
-            db, content, project_name, filename, model_choice, "batch", batch_id=batch_id,
-        )
-        results.append(record_to_dict(record, include_code=False))
-
-    skip_reasons = []
+    # Skip reasons knowable synchronously, before any inference runs --
+    # skip_invalid_content (only discoverable per-file, during scanning)
+    # is appended inside _run_batch_job and folded into the final result.
+    skip_reasons_so_far = []
     if skip_capped > 0:
-        skip_reasons.append(f"{skip_capped} file(s) beyond the {MAX_BATCH_FILES}-file-per-scan cap")
+        skip_reasons_so_far.append(f"{skip_capped} file(s) beyond the {MAX_BATCH_FILES}-file-per-scan cap")
     if skip_oversized > 0:
-        skip_reasons.append(f"{skip_oversized} file(s) exceeded the {MAX_FILE_SIZE // 1000}KB size limit")
+        skip_reasons_so_far.append(f"{skip_oversized} file(s) exceeded the {MAX_FILE_SIZE // 1000}KB size limit")
     if skip_unsupported > 0:
-        skip_reasons.append(f"{skip_unsupported} file(s) unsupported extension or excluded directory")
+        skip_reasons_so_far.append(f"{skip_unsupported} file(s) unsupported extension or excluded directory")
     if skip_unsafe_path > 0:
-        skip_reasons.append(f"{skip_unsafe_path} archive member(s) rejected for an unsafe path (../ or absolute)")
+        skip_reasons_so_far.append(f"{skip_unsafe_path} archive member(s) rejected for an unsafe path (../ or absolute)")
     if skip_corrupt_zip > 0:
-        skip_reasons.append(f"{skip_corrupt_zip} corrupt/unreadable ZIP archive(s)")
+        skip_reasons_so_far.append(f"{skip_corrupt_zip} corrupt/unreadable ZIP archive(s)")
     if skip_zip_bomb > 0:
-        skip_reasons.append(f"{skip_zip_bomb} ZIP archive(s) rejected (too many entries or too large uncompressed)")
-    if skip_invalid_content > 0:
-        skip_reasons.append(f"{skip_invalid_content} file(s) failed content validation (empty/malformed)")
+        skip_reasons_so_far.append(f"{skip_zip_bomb} ZIP archive(s) rejected (too many entries or too large uncompressed)")
 
-    vulnerable = sum(1 for r in results if r["verdict"] == "VULNERABLE")
+    db = SessionLocal()
+    try:
+        job_service.create_job(db, batch_id, kind="batch", files_total=len(to_process))
+    finally:
+        db.close()
+
+    background_tasks.add_task(
+        _run_batch_job, batch_id, to_process, project_name, model_choice,
+        len(files), files_detected, skip_reasons_so_far,
+    )
+
     return {
         "batch_id": batch_id,
-        "total_files_submitted": len(files),
-        "files_detected": files_detected,
-        "total_files_scanned": len(results),
-        "files_skipped": files_detected - len(results),
-        "skip_reasons": skip_reasons,
-        "vulnerable_count": vulnerable,
-        "safe_count": len(results) - vulnerable,
-        "results": results,
+        "status": "queued",
+        "files_total": len(to_process),
     }
 
 
@@ -287,6 +356,22 @@ def list_batches(db: Session = Depends(get_db)):
         }
         for r in rows
     ]
+
+
+@router.get("/jobs/{batch_id}")
+def get_job(batch_id: str, db: Session = Depends(get_db)):
+    """
+    Polled by the frontend (docs/ASYNC_SCAN_DESIGN.md Sec 6/7) after
+    POST /batch returns a batch_id. Declared before /{scan_id} below even
+    though the two route shapes don't actually collide ("/jobs/xyz" is two
+    path segments, "/{scan_id}" matches exactly one) -- more-specific-first
+    is just the clearer convention to read, not a correctness requirement
+    here.
+    """
+    job = job_service.get_job(db, batch_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return job_service.job_to_dict(job)
 
 
 @router.get("/{scan_id}")

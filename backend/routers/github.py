@@ -5,7 +5,7 @@
 # (the clone's ScanRecord rows are a normal batch, tagged with a "gh_" batch_id).
 # =============================================================================
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, BackgroundTasks, HTTPException
 from pydantic import BaseModel
 
 import github_service
@@ -19,16 +19,23 @@ class GitHubScanRequest(BaseModel):
 
 
 @router.post("/scan")
-def scan(req: GitHubScanRequest):
+def scan(req: GitHubScanRequest, background_tasks: BackgroundTasks):
+    """
+    Submits an async job and returns immediately (docs/ASYNC_SCAN_DESIGN.md)
+    instead of blocking for the full clone+scan duration. URL validation
+    (github_service._validate_url) still happens synchronously here -- a
+    bad/unsafe URL still gets an immediate 400, never a job that's queued
+    only to fail. Clone failures and "no scannable files" (previously
+    RuntimeError -> 422) now surface as the job's status="failed" + error
+    field instead, since there's no HTTP response left to attach a status
+    code to once "queued" has already been returned -- poll
+    GET /api/scan/jobs/{batch_id} for the outcome.
+    """
     try:
-        result = github_service.scan_repo(req.repo_url, req.project_name)
+        batch_id = github_service.submit_scan_job(req.repo_url, req.project_name, background_tasks)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    except RuntimeError as e:
-        raise HTTPException(status_code=422, detail=str(e))
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Unexpected error cloning/scanning repository: {e}")
-    return result
+    return {"batch_id": batch_id, "status": "queued"}
 
 
 @router.get("/{batch_id}/commits")

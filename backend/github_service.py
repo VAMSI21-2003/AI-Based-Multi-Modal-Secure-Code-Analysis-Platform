@@ -30,6 +30,7 @@ from urllib.parse import urlparse
 
 import datetime as dt
 
+import job_service
 from database import SessionLocal, GitHubBatchMeta
 from scan_service import run_and_store_scan
 from routers.scan import CODE_EXTENSIONS, EXCLUDED_DIR_NAMES
@@ -144,65 +145,107 @@ def _get_head_commit_sha(repo_dir: str) -> str | None:
     return sha if result.returncode == 0 and sha else None
 
 
-def scan_repo(repo_url: str, project_name: str = None) -> dict:
+def submit_scan_job(repo_url: str, project_name: str, background_tasks) -> str:
+    """
+    Entry point for POST /api/github/scan (docs/ASYNC_SCAN_DESIGN.md).
+    Validates the URL synchronously -- fail fast on a bad URL rather than
+    queuing a job doomed to fail minutes later, per the design's explicit
+    call -- then creates a scan_jobs row and schedules the actual
+    clone+scan as a background task. Returns the new batch_id immediately;
+    raises ValueError (unchanged from before) on a bad/unsafe URL, which
+    the router still maps to a synchronous 400.
+    """
     url = _validate_url(repo_url)
-    repo_name = url.rstrip("/").rsplit("/", 1)[-1].removesuffix(".git")
-    project_name = project_name or repo_name
+    batch_id = "gh_" + uuid.uuid4().hex[:10]
 
-    tmp_dir = tempfile.mkdtemp(prefix="secure_code_ai_ghmode_")
+    db = SessionLocal()
     try:
-        clone_result = _run_git(
-            ["clone", "--depth", str(CLONE_DEPTH), "--single-branch", url, tmp_dir],
-            timeout=CLONE_TIMEOUT_SEC,
-        )
-        if clone_result.returncode != 0:
-            raise RuntimeError(f"git clone failed: {clone_result.stderr.strip()[:400]}")
+        # files_total isn't known yet -- cloning + walking the repo hasn't
+        # happened. Set to 0 here; _run_github_scan_job calls
+        # job_service.set_files_total() once the real count is known,
+        # same two-step pattern batch jobs don't need (their files_total
+        # IS known synchronously, before the job row is even created).
+        job_service.create_job(db, batch_id, kind="github", files_total=0)
+    finally:
+        db.close()
 
-        commits = _get_commit_history(tmp_dir, limit=20)
-        branch = _get_head_branch(tmp_dir)
-        commit_sha = _get_head_commit_sha(tmp_dir)
+    background_tasks.add_task(_run_github_scan_job, batch_id, url, project_name)
+    return batch_id
 
-        # "Detected" = every file this platform's own extension/directory
-        # filtering considers in-scope, BEFORE the per-scan file cap --
-        # reported honestly so a capped scan never gets silently presented
-        # as full repository coverage.
-        detected_files = []
-        for root, dirs, files in os.walk(tmp_dir):
-            dirs[:] = [d for d in dirs if d != ".git" and d.lower() not in EXCLUDED_DIR_NAMES]
-            for name in files:
-                if os.path.splitext(name)[1].lower() not in CODE_EXTENSIONS:
-                    continue
-                full = os.path.join(root, name)
-                try:
-                    if os.path.getsize(full) > MAX_FILE_SIZE:
-                        continue
-                except OSError:
-                    continue
-                detected_files.append(full)
 
-        matched_files = detected_files[:MAX_REPO_FILES]
+def _run_github_scan_job(batch_id: str, url: str, project_name: str = None) -> None:
+    """
+    The clone + scan + finalize work previously done inline inside
+    scan_repo() (now removed), run off the request thread via
+    BackgroundTasks. Any exception here -- clone failure, no scannable
+    files, or anything unexpected -- is caught and recorded as a "failed"
+    job rather than propagated, since there is no HTTP response left to
+    attach an error status code to once the request has already returned
+    "queued".
+    """
+    db = SessionLocal()
+    try:
+        job_service.mark_running(db, batch_id)
 
-        if not matched_files:
-            raise RuntimeError("No scannable .c/.cpp/.h files found in this repository.")
+        repo_name = url.rstrip("/").rsplit("/", 1)[-1].removesuffix(".git")
+        project_name = project_name or repo_name
 
-        batch_id = "gh_" + uuid.uuid4().hex[:10]
-        db = SessionLocal()
-        scanned = 0
-        unreadable = 0
+        tmp_dir = tempfile.mkdtemp(prefix="secure_code_ai_ghmode_")
         try:
+            clone_result = _run_git(
+                ["clone", "--depth", str(CLONE_DEPTH), "--single-branch", url, tmp_dir],
+                timeout=CLONE_TIMEOUT_SEC,
+            )
+            if clone_result.returncode != 0:
+                raise RuntimeError(f"git clone failed: {clone_result.stderr.strip()[:400]}")
+
+            commits = _get_commit_history(tmp_dir, limit=20)
+            branch = _get_head_branch(tmp_dir)
+            commit_sha = _get_head_commit_sha(tmp_dir)
+
+            # "Detected" = every file this platform's own extension/directory
+            # filtering considers in-scope, BEFORE the per-scan file cap --
+            # reported honestly so a capped scan never gets silently presented
+            # as full repository coverage.
+            detected_files = []
+            for root, dirs, files in os.walk(tmp_dir):
+                dirs[:] = [d for d in dirs if d != ".git" and d.lower() not in EXCLUDED_DIR_NAMES]
+                for name in files:
+                    if os.path.splitext(name)[1].lower() not in CODE_EXTENSIONS:
+                        continue
+                    full = os.path.join(root, name)
+                    try:
+                        if os.path.getsize(full) > MAX_FILE_SIZE:
+                            continue
+                    except OSError:
+                        continue
+                    detected_files.append(full)
+
+            matched_files = detected_files[:MAX_REPO_FILES]
+
+            if not matched_files:
+                raise RuntimeError("No scannable .c/.cpp/.h files found in this repository.")
+
+            job_service.set_files_total(db, batch_id, len(matched_files))
+
+            scanned = 0
+            unreadable = 0
             for full in matched_files:
                 try:
                     with open(full, "r", encoding="utf-8", errors="replace") as fh:
                         code = fh.read()
                 except OSError:
                     unreadable += 1
+                    job_service.increment_progress(db, batch_id, failed_delta=1)
                     continue
                 if not code.strip():
                     unreadable += 1
+                    job_service.increment_progress(db, batch_id, failed_delta=1)
                     continue
                 rel_path = os.path.relpath(full, tmp_dir).replace("\\", "/")
                 run_and_store_scan(db, code, project_name, rel_path, "XGBoost", "github", batch_id=batch_id)
                 scanned += 1
+                job_service.increment_progress(db, batch_id, completed_delta=1)
 
             capped_out = len(detected_files) - len(matched_files)
             skip_reasons = []
@@ -218,20 +261,23 @@ def scan_repo(repo_url: str, project_name: str = None) -> dict:
                 scanned_at=dt.datetime.utcnow(),
             ))
             db.commit()
+
+            _COMMIT_HISTORY[batch_id] = commits
+
+            result = {
+                "batch_id": batch_id, "repo_url": url, "repo_name": repo_name, "project_name": project_name,
+                "branch": branch, "commit_sha": commit_sha,
+                "files_scanned": scanned, "files_found": len(matched_files),
+                "files_detected": len(detected_files), "files_skipped": len(detected_files) - scanned,
+                "skip_reasons": skip_reasons, "commits_recorded": len(commits),
+            }
+            job_service.mark_succeeded(db, batch_id, result)
         finally:
-            db.close()
-
-        _COMMIT_HISTORY[batch_id] = commits
-
-        return {
-            "batch_id": batch_id, "repo_url": url, "repo_name": repo_name, "project_name": project_name,
-            "branch": branch, "commit_sha": commit_sha,
-            "files_scanned": scanned, "files_found": len(matched_files),
-            "files_detected": len(detected_files), "files_skipped": len(detected_files) - scanned,
-            "skip_reasons": skip_reasons, "commits_recorded": len(commits),
-        }
+            shutil.rmtree(tmp_dir, ignore_errors=True)
+    except Exception as e:
+        job_service.mark_failed(db, batch_id, str(e))
     finally:
-        shutil.rmtree(tmp_dir, ignore_errors=True)
+        db.close()
 
 
 def get_commit_history(batch_id: str) -> list:
